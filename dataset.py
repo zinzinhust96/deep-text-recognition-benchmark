@@ -107,6 +107,19 @@ def hierarchical_dataset(root, opt, select_data='/'):
 
     return concatenated_dataset
 
+def hierarchical_dataset2(opt):
+    dataset_list = []
+    select_data = opt.select_val_data.split('-')
+    print(f'dataset_root:    {opt.valid_data}')
+    for data in select_data:
+        dirpath = os.path.join(opt.valid_data, data)
+        dataset = LmdbDataset(dirpath, opt)
+        print(f'sub-directory:\t/{data}\t num samples: {len(dataset)}')
+        dataset_list.append(dataset)
+
+    concatenated_dataset = ConcatDataset(dataset_list)
+
+    return concatenated_dataset
 
 class LmdbDataset(Dataset):
 

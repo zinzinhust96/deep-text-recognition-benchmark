@@ -13,7 +13,7 @@ import torch.utils.data
 import numpy as np
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset
+from dataset import hierarchical_dataset, hierarchical_dataset2, AlignCollate, Batch_Balanced_Dataset
 from model import Model
 from test import validation
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -26,7 +26,8 @@ def train(opt):
     train_dataset = Batch_Balanced_Dataset(opt)
 
     AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    valid_dataset = hierarchical_dataset(root=opt.valid_data, opt=opt)
+    # valid_dataset = hierarchical_dataset(root=opt.valid_data, opt=opt)
+    valid_dataset = hierarchical_dataset2(opt)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -43,6 +44,7 @@ def train(opt):
 
     if opt.rgb:
         opt.input_channel = 3
+    # setup model
     model = Model(opt)
     print('model input parameters', opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel,
           opt.hidden_size, opt.num_class, opt.batch_max_length, opt.Transformation, opt.FeatureExtraction,
@@ -51,7 +53,7 @@ def train(opt):
     # weight initialization
     for name, param in model.named_parameters():
         if 'localization_fc2' in name:
-            print(f'Skip {name} as it is already initialized')
+            print('Skip {} as it is already initialized'.format(name))
             continue
         try:
             if 'bias' in name:
@@ -65,16 +67,32 @@ def train(opt):
 
     # data parallel for multi-GPU
     model = torch.nn.DataParallel(model).to(device)
-    model.train()
-    if opt.saved_model != '':
-        print(f'loading pretrained model from {opt.saved_model}')
-        if opt.FT:
-            model.load_state_dict(torch.load(opt.saved_model), strict=False)
+    model_state_dict = model.state_dict()
+    if opt.continue_model != '':
+        print('loading pretrained model from {}'.format(opt.continue_model))
+        if opt.continue_model in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'saved_models/TPS-ResNet-BiLSTM-CTC-Seed510/iter_170000.pth']:
+            pretrained_dict = torch.load(opt.continue_model)
         else:
-            model.load_state_dict(torch.load(opt.saved_model))
-    print("Model:")
-    print(model)
+            checkpoint = torch.load(opt.continue_model)
+            # model.load_state_dict(checkpoint['model_state_dict'])
+            pretrained_dict = checkpoint['model_state_dict']
+        
+        level = ['Transformation', 'FeatureExtraction', 'SequenceModeling', 'Prediction']
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k.split('.')[1] in level[:opt.load_level]}
+        print('=================== pretrained state dict ===================')
+        # for param_tensor in pretrained_dict:
+        #     print(param_tensor, "\t", pretrained_dict[param_tensor].size())
+        model_state_dict.update(pretrained_dict)
+        model.load_state_dict(model_state_dict)
 
+        print('=================== Model state dict ===================')
+        # ### freeze layer weight
+        # for name, param in model.named_parameters():
+        #     if name.split('.')[1] in level[:opt.freeze_level]:
+        #         param.requires_grad = False
+        #     print(name, '\t', param.requires_grad)
+
+    print('=================== end ===================')
     """ setup loss """
     if 'CTC' in opt.Prediction:
         criterion = torch.nn.CTCLoss(zero_infinity=True).to(device)
@@ -97,25 +115,28 @@ def train(opt):
         optimizer = optim.Adam(filtered_parameters, lr=opt.lr, betas=(opt.beta1, 0.999))
     else:
         optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
-    print("Optimizer:")
-    print(optimizer)
-
+    print("Optimizer: ", optimizer)
+    if opt.continue_model != '':
+        if opt.continue_model not in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'saved_models/TPS-ResNet-BiLSTM-CTC-Seed510/iter_170000.pth']:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+         
     """ final options """
     # print(opt)
-    with open(f'./saved_models/{opt.experiment_name}/opt.txt', 'a') as opt_file:
+    with open('./saved_models/{}/opt.txt'.format(opt.experiment_name), 'a') as opt_file:
         opt_log = '------------ Options -------------\n'
         args = vars(opt)
         for k, v in args.items():
-            opt_log += f'{str(k)}: {str(v)}\n'
+            opt_log += '{}: {}\n'.format(str(k), str(v))
         opt_log += '---------------------------------------\n'
         print(opt_log)
         opt_file.write(opt_log)
 
     """ start training """
+    model.train()
     start_iter = 0
-    if opt.saved_model != '':
-        start_iter = int(opt.saved_model.split('_')[-1].split('.')[0])
-        print(f'continue to train, start_iter: {start_iter}')
+    if opt.continue_model != '':
+        start_iter = int(opt.continue_model.split('_')[-1].split('.')[0])
+        print('continue to train, start_iter: {}'.format(start_iter))
 
     start_time = time.time()
     best_accuracy = -1
@@ -131,20 +152,14 @@ def train(opt):
 
         if 'CTC' in opt.Prediction:
             preds = model(image, text).log_softmax(2)
-            preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+            preds_size = torch.IntTensor([preds.size(1)] * batch_size).to(device)
             preds = preds.permute(1, 0, 2)  # to use CTCLoss format
 
-            # (ctc_a) To avoid ctc_loss issue, disabled cudnn for the computation of the ctc_loss
+            # To avoid ctc_loss issue, disabled cudnn for the computation of the ctc_loss
             # https://github.com/jpuigcerver/PyLaia/issues/16
             torch.backends.cudnn.enabled = False
-            cost = criterion(preds, text.to(device), preds_size.to(device), length.to(device))
+            cost = criterion(preds, text, preds_size, length)
             torch.backends.cudnn.enabled = True
-
-            # # (ctc_b) To reproduce our pretrained model / paper, use our previous code (below code) instead of (ctc_a).
-            # # With PyTorch 1.2.0, the below code occurs NAN, so you may use PyTorch 1.1.0.
-            # # Thus, the result of CTCLoss is different in PyTorch 1.1.0 and PyTorch 1.2.0.
-            # # See https://github.com/clovaai/deep-text-recognition-benchmark/issues/56#issuecomment-526490707
-            # cost = criterion(preds, text, preds_size, length)
 
         else:
             preds = model(image, text[:, :-1]) # align with Attention.forward
@@ -161,10 +176,10 @@ def train(opt):
         # validation part
         if i % opt.valInterval == 0:
             elapsed_time = time.time() - start_time
-            print(f'[{i}/{opt.num_iter}] Loss: {loss_avg.val():0.5f} elapsed_time: {elapsed_time:0.5f}')
+            print('[{}/{}] Loss: {:0.5f} elapsed_time: {:0.5f}'.format(i, opt.num_iter, loss_avg.val(), elapsed_time))
             # for log
-            with open(f'./saved_models/{opt.experiment_name}/log_train.txt', 'a') as log:
-                log.write(f'[{i}/{opt.num_iter}] Loss: {loss_avg.val():0.5f} elapsed_time: {elapsed_time:0.5f}\n')
+            with open('./saved_models/{}/log_train.txt'.format(opt.experiment_name), 'a') as log:
+                log.write('[{}/{}] Loss: {:0.5f} elapsed_time: {:0.5f}\n'.format(i, opt.num_iter, loss_avg.val(), elapsed_time))
                 loss_avg.reset()
 
                 model.eval()
@@ -177,29 +192,32 @@ def train(opt):
                     if 'Attn' in opt.Prediction:
                         pred = pred[:pred.find('[s]')]
                         gt = gt[:gt.find('[s]')]
-                    print(f'{pred:20s}, gt: {gt:20s},   {str(pred == gt)}')
-                    log.write(f'{pred:20s}, gt: {gt:20s},   {str(pred == gt)}\n')
+                    print('{:20s}, gt: {:20s},   {}'.format(pred, gt, str(pred == gt)))
+                    log.write('{:20s}, gt: {:20s},   {}\n'.format(pred, gt, str(pred == gt)))
 
-                valid_log = f'[{i}/{opt.num_iter}] valid loss: {valid_loss:0.5f}'
-                valid_log += f' accuracy: {current_accuracy:0.3f}, norm_ED: {current_norm_ED:0.2f}'
+                valid_log = '[{}/{}] valid loss: {:0.5f}'.format(i, opt.num_iter, valid_loss)
+                valid_log += ' accuracy: {:0.3f}, norm_ED: {:0.2f}'.format(current_accuracy, current_norm_ED)
                 print(valid_log)
                 log.write(valid_log + '\n')
 
                 # keep best accuracy model
                 if current_accuracy > best_accuracy:
                     best_accuracy = current_accuracy
-                    torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_accuracy.pth')
+                    torch.save(model.state_dict(), './saved_models/{}/best_accuracy.pth'.format(opt.experiment_name))
                 if current_norm_ED < best_norm_ED:
                     best_norm_ED = current_norm_ED
-                    torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_norm_ED.pth')
-                best_model_log = f'best_accuracy: {best_accuracy:0.3f}, best_norm_ED: {best_norm_ED:0.2f}'
+                    torch.save(model.state_dict(), './saved_models/{}/best_norm_ED.pth'.format(opt.experiment_name))
+                best_model_log = 'best_accuracy: {:0.3f}, best_norm_ED: {:0.2f}'.format(best_accuracy,best_norm_ED)
                 print(best_model_log)
                 log.write(best_model_log + '\n')
 
         # save model per 1e+5 iter.
-        if (i + 1) % 1e+5 == 0:
-            torch.save(
-                model.state_dict(), f'./saved_models/{opt.experiment_name}/iter_{i+1}.pth')
+        if (i + 1) % opt.save_iter == 0:
+            print('saving iteration {}...'.format(i + 1))
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+            }, './saved_models/{}/iter_{}.pth'.format(opt.experiment_name,i+1))
 
         if i == opt.num_iter:
             print('end the training')
@@ -217,8 +235,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=192, help='input batch size')
     parser.add_argument('--num_iter', type=int, default=300000, help='number of iterations to train for')
     parser.add_argument('--valInterval', type=int, default=2000, help='Interval between each validation')
-    parser.add_argument('--saved_model', default='', help="path to model to continue training")
-    parser.add_argument('--FT', action='store_true', help='whether to do fine-tuning')
+    parser.add_argument('--continue_model', default='', help="path to model to continue training")
     parser.add_argument('--adam', action='store_true', help='Whether to use adam (default is Adadelta)')
     parser.add_argument('--lr', type=float, default=1, help='learning rate, default=1.0 for Adadelta')
     parser.add_argument('--beta1', type=float, default=0.9, help='beta1 for adam. default=0.9')
@@ -250,15 +267,23 @@ if __name__ == '__main__':
     parser.add_argument('--output_channel', type=int, default=512,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
+    # additional argument
+    parser.add_argument('--load_level', type=int, default=4, help='up to 0. Transformation\n1: FeatureExtraction\n2: SequenceModeling\n3: Prediction')
+    # parser.add_argument('--freeze_level', type=int, default=3, help='up to 1. Transformation\n2: FeatureExtraction\n3: SequenceModeling\n4: Prediction')
+    parser.add_argument('--save_iter', type=int, default=50000, help='number of iterations to save')
+    parser.add_argument('--select_val_data', type=str, default='', help='select validation data (default is --select-data)')
 
     opt = parser.parse_args()
 
     if not opt.experiment_name:
-        opt.experiment_name = f'{opt.Transformation}-{opt.FeatureExtraction}-{opt.SequenceModeling}-{opt.Prediction}'
-        opt.experiment_name += f'-Seed{opt.manualSeed}'
+        opt.experiment_name = '{}-{}-{}-{}'.format(opt.Transformation,opt.FeatureExtraction,opt.SequenceModeling,opt.Prediction)
+        opt.experiment_name += '-Seed{}'.format(opt.manualSeed)
         # print(opt.experiment_name)
 
-    os.makedirs(f'./saved_models/{opt.experiment_name}', exist_ok=True)
+    os.makedirs('./saved_models/{}'.format(opt.experiment_name), exist_ok=True)
+
+    if opt.select_val_data == '':
+        opt.select_val_data = opt.select_data
 
     """ vocab / character number configuration """
     if opt.sensitive:
@@ -281,7 +306,6 @@ if __name__ == '__main__':
         print('if you stuck too long time with multi-GPU setting, try to set --workers 0')
         # check multi-GPU issue https://github.com/clovaai/deep-text-recognition-benchmark/issues/1
         opt.workers = opt.workers * opt.num_gpu
-        opt.batch_size = opt.batch_size * opt.num_gpu
 
         """ previous version
         print('To equlize batch stats to 1-GPU setting, the batch_size is multiplied with num_gpu and multiplied batch_size is ', opt.batch_size)

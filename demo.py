@@ -1,5 +1,10 @@
 import string
 import argparse
+import os
+import cv2
+import re
+import time
+import numpy as np
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -9,6 +14,23 @@ from utils import CTCLabelConverter, AttnLabelConverter
 from dataset import RawDataset, AlignCollate
 from model import Model
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+src_folder = os.path.dirname(os.getcwd()) + '/CRAFT-pytorch/data_classify/'
+classify_folder = os.path.dirname(os.getcwd()) + '/sign_drop/classify/'
+
+def save_classify(image_path, prediction, opt):
+    if bool(re.match('^[0-9]+$', prediction)) != True:
+        label = 'other'
+    else:
+        label = prediction
+    save_path = classify_folder + '/' + label + '/'
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    # read original image
+    image_name = image_path.replace(opt.image_folder, '')
+    original_image = cv2.imread(src_folder + image_name)
+    # save original image to folder corresponding to labels
+    cv2.imwrite(save_path + image_name, original_image)
 
 
 def demo(opt):
@@ -42,38 +64,78 @@ def demo(opt):
 
     # predict
     model.eval()
-    with torch.no_grad():
-        for image_tensors, image_path_list in demo_loader:
-            batch_size = image_tensors.size(0)
-            image = image_tensors.to(device)
-            # For max length prediction
-            length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
-            text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
+    # with torch.no_grad():
+    for image_tensors, image_path_list in demo_loader:
+        # batch_size = image_tensors.size(0)
+        batch_size = 1
+        image = image_tensors.to(device)
+        # For max length prediction
+        length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
+        text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
 
-            if 'CTC' in opt.Prediction:
-                preds = model(image, text_for_pred).log_softmax(2)
+        preds_str = []
+        batch_time = []
+        if 'CTC' in opt.Prediction:
+            # preds = model(image, text_for_pred).log_softmax(2)
+
+            # # Select max probabilty (greedy decoding) then decode index to character
+            # preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+            # _, preds_index = preds.permute(1, 0, 2).max(2)
+            # preds_index = preds_index.transpose(1, 0).contiguous().view(-1)
+            # preds_str = converter.decode(preds_index.data, preds_size.data)
+
+            # predict on each image
+            for i in range(0, image.shape[0]):
+                start_time = time.time()
+                one_img = image[i]
+                one_img = one_img[None, :, :, :]
+                pred = model(one_img, text_for_pred).log_softmax(2)
+                # print('time: ', time.time() - start_time)
 
                 # Select max probabilty (greedy decoding) then decode index to character
-                preds_size = torch.IntTensor([preds.size(1)] * batch_size)
-                _, preds_index = preds.permute(1, 0, 2).max(2)
-                preds_index = preds_index.transpose(1, 0).contiguous().view(-1)
-                preds_str = converter.decode(preds_index.data, preds_size.data)
+                pred_size = torch.IntTensor([pred.size(1)] * batch_size)
+                _, pred_index = pred.permute(1, 0, 2).max(2)
+                pred_index = pred_index.transpose(1, 0).contiguous().view(-1)
+                pred_str = converter.decode(pred_index.data, pred_size.data)
 
-            else:
-                preds = model(image, text_for_pred, is_train=False)
+                # add to list
+                preds_str.append(pred_str[0])
+                batch_time.append(time.time() - start_time)
+
+        else:
+            # preds = model(image, text_for_pred, is_train=False)
+
+            # # select max probabilty (greedy decoding) then decode index to character
+            # _, preds_index = preds.max(2)
+            # preds_str = converter.decode(preds_index, length_for_pred)
+
+            # predict on each image
+            for i in range(0, image.shape[0]):
+                start_time = time.time()
+                one_img = image[i]
+                one_img = one_img[None, :, :, :]
+                pred = model(one_img, text_for_pred, is_train=False)
 
                 # select max probabilty (greedy decoding) then decode index to character
-                _, preds_index = preds.max(2)
-                preds_str = converter.decode(preds_index, length_for_pred)
+                _, pred_index = pred.max(2)
+                pred_str = converter.decode(pred_index, length_for_pred)
 
-            print('-' * 80)
-            print('image_path\tpredicted_labels')
-            print('-' * 80)
-            for img_name, pred in zip(image_path_list, preds_str):
-                if 'Attn' in opt.Prediction:
-                    pred = pred[:pred.find('[s]')]  # prune after "end of sentence" token ([s])
+                # add to list
+                preds_str.append(pred_str[0])
+                batch_time.append(time.time() - start_time)
 
-                print(f'{img_name}\t{pred}')
+        print('-' * 80)
+        print('image_path\tpredicted_labels\tElapsed time')
+        print('-' * 80)
+        for img_name, pred, t in zip(image_path_list, preds_str, batch_time):
+            if 'Attn' in opt.Prediction:
+                pred = pred[:pred.find('[s]')]  # prune after "end of sentence" token ([s])
+
+            print(f'{img_name}\t{pred}\t{t}')
+            # save_classify(img_name, pred, opt)
+
+    print('Total time: ', np.sum(batch_time[1:]))
+
 
 
 if __name__ == '__main__':
@@ -105,10 +167,13 @@ if __name__ == '__main__':
 
     """ vocab / character number configuration """
     if opt.sensitive:
-        opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
+        opt.character += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+        # opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
 
     cudnn.benchmark = True
     cudnn.deterministic = True
     opt.num_gpu = torch.cuda.device_count()
+
+    print('PADDING: ', opt.PAD)
 
     demo(opt)
