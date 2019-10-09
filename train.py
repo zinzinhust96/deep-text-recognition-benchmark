@@ -13,7 +13,7 @@ import torch.utils.data
 import numpy as np
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset
+from dataset import hierarchical_dataset, hierarchical_dataset2, AlignCollate, Batch_Balanced_Dataset
 from model import Model
 from test import validation
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -26,7 +26,8 @@ def train(opt):
     train_dataset = Batch_Balanced_Dataset(opt)
 
     AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    valid_dataset = hierarchical_dataset(root=opt.valid_data, opt=opt)
+    # valid_dataset = hierarchical_dataset(root=opt.valid_data, opt=opt)
+    valid_dataset = hierarchical_dataset2(opt)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -43,6 +44,7 @@ def train(opt):
 
     if opt.rgb:
         opt.input_channel = 3
+    # setup model
     model = Model(opt)
     print('model input parameters', opt.imgH, opt.imgW, opt.num_fiducial, opt.input_channel, opt.output_channel,
           opt.hidden_size, opt.num_class, opt.batch_max_length, opt.Transformation, opt.FeatureExtraction,
@@ -65,14 +67,30 @@ def train(opt):
 
     # data parallel for multi-GPU
     model = torch.nn.DataParallel(model).to(device)
-    model.train()
+    model_state_dict = model.state_dict()
     if opt.saved_model != '':
-        print(f'loading pretrained model from {opt.saved_model}')
-        if opt.FT:
-            model.load_state_dict(torch.load(opt.saved_model), strict=False)
+        print('loading pretrained model from {}'.format(opt.saved_model))
+        if opt.saved_model in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'saved_models/TPS-ResNet-BiLSTM-CTC-Seed510/iter_170000.pth']:
+            pretrained_dict = torch.load(opt.saved_model)
         else:
-            model.load_state_dict(torch.load(opt.saved_model))
-    print("Model:")
+            checkpoint = torch.load(opt.saved_model)
+            # model.load_state_dict(checkpoint['model_state_dict'])
+            pretrained_dict = checkpoint['model_state_dict']
+        
+        level = ['Transformation', 'FeatureExtraction', 'SequenceModeling', 'Prediction']
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k.split('.')[1] in level[:opt.load_level]}
+        # print('=================== pretrained state dict ===================')
+        # for param_tensor in pretrained_dict:
+        #     print(param_tensor, "\t", pretrained_dict[param_tensor].size())
+        model_state_dict.update(pretrained_dict)
+        model.load_state_dict(model_state_dict, strict=False)
+        # ### freeze layer weight
+        # for name, param in model.named_parameters():
+        #     if name.split('.')[1] in level[:opt.freeze_level]:
+        #         param.requires_grad = False
+        #     print(name, '\t', param.requires_grad)
+
+    print('=================== Model ===================')
     print(model)
 
     """ setup loss """
@@ -97,8 +115,10 @@ def train(opt):
         optimizer = optim.Adam(filtered_parameters, lr=opt.lr, betas=(opt.beta1, 0.999))
     else:
         optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
-    print("Optimizer:")
-    print(optimizer)
+    print("Optimizer: ", optimizer)
+    if opt.saved_model != '':
+        if opt.saved_model not in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'saved_models/TPS-ResNet-BiLSTM-CTC-Seed510/iter_170000.pth']:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     """ final options """
     # print(opt)
@@ -112,6 +132,7 @@ def train(opt):
         opt_file.write(opt_log)
 
     """ start training """
+    model.train()
     start_iter = 0
     if opt.saved_model != '':
         start_iter = int(opt.saved_model.split('_')[-1].split('.')[0])
@@ -197,9 +218,12 @@ def train(opt):
                 log.write(best_model_log + '\n')
 
         # save model per 1e+5 iter.
-        if (i + 1) % 1e+5 == 0:
-            torch.save(
-                model.state_dict(), f'./saved_models/{opt.experiment_name}/iter_{i+1}.pth')
+        if (i + 1) % opt.save_iter == 0:
+            print('saving iteration {}...'.format(i + 1))
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+            }, './saved_models/{}/iter_{}.pth'.format(opt.experiment_name,i+1))
 
         if i == opt.num_iter:
             print('end the training')
@@ -250,6 +274,11 @@ if __name__ == '__main__':
     parser.add_argument('--output_channel', type=int, default=512,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
+    # additional argument
+    parser.add_argument('--load_level', type=int, default=4, help='up to 0. Transformation\n1: FeatureExtraction\n2: SequenceModeling\n3: Prediction')
+    # parser.add_argument('--freeze_level', type=int, default=3, help='up to 1. Transformation\n2: FeatureExtraction\n3: SequenceModeling\n4: Prediction')
+    parser.add_argument('--save_iter', type=int, default=50000, help='number of iterations to save')
+    parser.add_argument('--select_val_data', type=str, default='', help='select validation data (default is --select-data)')
 
     opt = parser.parse_args()
 
@@ -259,6 +288,9 @@ if __name__ == '__main__':
         # print(opt.experiment_name)
 
     os.makedirs(f'./saved_models/{opt.experiment_name}', exist_ok=True)
+
+    if opt.select_val_data == '':
+        opt.select_val_data = opt.select_data
 
     """ vocab / character number configuration """
     if opt.sensitive:

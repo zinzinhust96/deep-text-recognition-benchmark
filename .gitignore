@@ -206,3 +206,7 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+demo_image
+sign_drop*
+images*
