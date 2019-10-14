@@ -10,14 +10,14 @@ import torch.backends.cudnn as cudnn
 import torch.nn.init as init
 import torch.optim as optim
 import torch.utils.data
+from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, hierarchical_dataset2, AlignCollate, Batch_Balanced_Dataset
+from dataset import hierarchical_dataset, hierarchical_dataset2, AlignCollate, Batch_Balanced_Dataset, CollateFn
 from model import Model
 from test import validation
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 def train(opt):
     """ dataset preparation """
@@ -25,12 +25,13 @@ def train(opt):
     opt.batch_ratio = opt.batch_ratio.split('-')
     train_dataset = Batch_Balanced_Dataset(opt)
 
-    AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    # AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    AlignCollate_valid = CollateFn(imgH=32)
     # valid_dataset = hierarchical_dataset(root=opt.valid_data, opt=opt)
     valid_dataset = hierarchical_dataset2(opt)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
-        shuffle=True,  # 'True' to check training progress with validation function.
+        shuffle=False,  # 'True' to check training progress with validation function.
         num_workers=int(opt.workers),
         collate_fn=AlignCollate_valid, pin_memory=True)
     print('-' * 80)
@@ -70,7 +71,7 @@ def train(opt):
     model_state_dict = model.state_dict()
     if opt.saved_model != '':
         print('loading pretrained model from {}'.format(opt.saved_model))
-        if opt.saved_model in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'saved_models/TPS-ResNet-BiLSTM-CTC-Seed510/iter_170000.pth']:
+        if opt.saved_model in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'pretrained_model/None-VGG-BiLSTM-CTC_0.pth']:
             pretrained_dict = torch.load(opt.saved_model)
         else:
             checkpoint = torch.load(opt.saved_model)
@@ -83,6 +84,8 @@ def train(opt):
         # for param_tensor in pretrained_dict:
         #     print(param_tensor, "\t", pretrained_dict[param_tensor].size())
         model_state_dict.update(pretrained_dict)
+        # for param_tensor in model_state_dict:
+        #     print(param_tensor, "\t", model_state_dict[param_tensor].size())
         model.load_state_dict(model_state_dict, strict=False)
         # ### freeze layer weight
         # for name, param in model.named_parameters():
@@ -90,8 +93,8 @@ def train(opt):
         #         param.requires_grad = False
         #     print(name, '\t', param.requires_grad)
 
-    print('=================== Model ===================')
-    print(model)
+    # print('=================== Model ===================')
+    # print(model)
 
     """ setup loss """
     if 'CTC' in opt.Prediction:
@@ -117,7 +120,7 @@ def train(opt):
         optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
     print("Optimizer: ", optimizer)
     if opt.saved_model != '':
-        if opt.saved_model not in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'saved_models/TPS-ResNet-BiLSTM-CTC-Seed510/iter_170000.pth']:
+        if opt.saved_model not in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth', 'pretrained_model/None-VGG-BiLSTM-CTC_0.pth']:
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     """ final options """
@@ -186,6 +189,7 @@ def train(opt):
             # for log
             with open(f'./saved_models/{opt.experiment_name}/log_train.txt', 'a') as log:
                 log.write(f'[{i}/{opt.num_iter}] Loss: {loss_avg.val():0.5f} elapsed_time: {elapsed_time:0.5f}\n')
+                writer.add_scalar('Loss', loss_avg.val(), i)
                 loss_avg.reset()
 
                 model.eval()
@@ -203,6 +207,9 @@ def train(opt):
 
                 valid_log = f'[{i}/{opt.num_iter}] valid loss: {valid_loss:0.5f}'
                 valid_log += f' accuracy: {current_accuracy:0.3f}, norm_ED: {current_norm_ED:0.2f}'
+                writer.add_scalar('Valid loss', valid_loss, i)
+                writer.add_scalar('Accuracy', current_accuracy, i)
+                writer.add_scalar('Norm_ED', current_norm_ED, i)
                 print(valid_log)
                 log.write(valid_log + '\n')
 
@@ -229,7 +236,6 @@ def train(opt):
             print('end the training')
             sys.exit()
         i += 1
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -288,6 +294,8 @@ if __name__ == '__main__':
         # print(opt.experiment_name)
 
     os.makedirs(f'./saved_models/{opt.experiment_name}', exist_ok=True)
+    # Writer will output to ./runs/ directory by default
+    writer = SummaryWriter(log_dir=f'./saved_models/{opt.experiment_name}')
 
     if opt.select_val_data == '':
         opt.select_val_data = opt.select_data
@@ -324,3 +332,5 @@ if __name__ == '__main__':
         """
 
     train(opt)
+
+    writer.close()

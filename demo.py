@@ -11,7 +11,7 @@ import torch.backends.cudnn as cudnn
 import torch.utils.data
 
 from utils import CTCLabelConverter, AttnLabelConverter
-from dataset import RawDataset, AlignCollate
+from dataset import RawDataset, AlignCollate, CollateFn
 from model import Model
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -37,16 +37,20 @@ def demo(opt):
     model.load_state_dict(torch.load(opt.saved_model))
 
     # prepare data. two demo images from https://github.com/bgshih/crnn#run-demo
-    AlignCollate_demo = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    # AlignCollate_demo = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    AlignCollate_demo = CollateFn(imgH=32)
     demo_data = RawDataset(root=opt.image_folder, opt=opt)  # use RawDataset
     demo_loader = torch.utils.data.DataLoader(
-        demo_data, batch_size=opt.batch_size,
+        demo_data, batch_size=1,
         shuffle=False,
         num_workers=int(opt.workers),
         collate_fn=AlignCollate_demo, pin_memory=True)
 
     # predict
     model.eval()
+    print('-' * 80)
+    print('image_path\tpredicted_labels\tElapsed time')
+    print('-' * 80)
     # with torch.no_grad():
     for image_tensors, image_path_list in demo_loader:
         # batch_size = image_tensors.size(0)
@@ -108,9 +112,6 @@ def demo(opt):
                 batch_time.append(time.time() - start_time)
 
 
-        print('-' * 80)
-        print('image_path\tpredicted_labels\tElapsed time')
-        print('-' * 80)
         for img_name, pred, t in zip(image_path_list, preds_str, batch_time):
             if 'Attn' in opt.Prediction:
                 pred = pred[:pred.find('[s]')]  # prune after "end of sentence" token ([s])

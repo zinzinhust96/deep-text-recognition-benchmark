@@ -12,6 +12,7 @@ import numpy as np
 from torch.utils.data import Dataset, ConcatDataset, Subset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
+import time
 
 
 class Batch_Balanced_Dataset(object):
@@ -26,7 +27,8 @@ class Batch_Balanced_Dataset(object):
         print(f'dataset_root: {opt.train_data}\nopt.select_data: {opt.select_data}\nopt.batch_ratio: {opt.batch_ratio}')
         assert len(opt.select_data) == len(opt.batch_ratio)
 
-        _AlignCollate = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+        # _AlignCollate = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+        _AlignCollate = CollateFn(imgH=32)
         self.data_loader_list = []
         self.dataloader_iter_list = []
         batch_size_list = []
@@ -54,7 +56,7 @@ class Batch_Balanced_Dataset(object):
 
             _data_loader = torch.utils.data.DataLoader(
                 _dataset, batch_size=_batch_size,
-                shuffle=True,
+                shuffle=False,
                 num_workers=int(opt.workers),
                 collate_fn=_AlignCollate, pin_memory=True)
             self.data_loader_list.append(_data_loader)
@@ -120,6 +122,23 @@ def hierarchical_dataset2(opt):
     concatenated_dataset = ConcatDataset(dataset_list)
 
     return concatenated_dataset
+
+
+class SortedDataset(Dataset):
+    def __init__(self, dataset):
+        self.nSamples = len(dataset)
+        ratio_list = [image.size[0] / float(image.size[1]) for (image, label) in dataset]
+        sorted_indexes = np.argsort(np.array(ratio_list))
+        self.sorted_dataset = [dataset[i] for i in sorted_indexes]
+
+    def __len__(self):
+        return self.nSamples
+
+    def __getitem__(self, index):
+
+        (image, label) = self.sorted_dataset[index]
+
+        return (image, label)
 
 class LmdbDataset(Dataset):
 
@@ -253,6 +272,22 @@ class ResizeNormalize(object):
         img.sub_(0.5).div_(0.5)
         return img
 
+class ResizeNormalizeByHeight(object):
+
+    def __init__(self, height = None, interpolation=Image.BICUBIC):
+        self.height = height
+        self.interpolation = interpolation
+        self.toTensor = transforms.ToTensor()
+
+    def __call__(self, img):
+        w, h = img.size
+        ratio = w / float(h)
+        size = (int(self.height * ratio), self.height)
+        img = img.resize(size, self.interpolation)
+        img = self.toTensor(img)
+        img.sub_(0.5).div_(0.5)
+        return img
+
 
 class NormalizePAD(object):
 
@@ -311,6 +346,29 @@ class AlignCollate(object):
 
         return image_tensors, labels
 
+class CollateFn(object):
+
+    def __init__(self, imgH):
+        self.imgH = imgH
+
+    def __call__(self, batch):
+        batch = filter(lambda x: x is not None, batch)
+        images, labels = zip(*batch)
+
+        ratio_list = np.array([image.size[0] / float(image.size[1]) for image in images])
+        mean_ratio = np.mean(ratio_list)
+        transform = ResizeNormalize((np.clip(int(self.imgH * mean_ratio), 40, None), self.imgH))
+        # transform = ResizeNormalizeByHeight(height=32)
+        # print(mean_ratio, int(self.imgH * mean_ratio))
+        image_tensors = []
+        for image in images:    
+            image_tensor = transform(image)
+            # print(image_tensor.size())
+            image_tensors.append(image_tensor)
+
+        image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
+
+        return image_tensors, labels
 
 def tensor2im(image_tensor, imtype=np.uint8):
     image_numpy = image_tensor.cpu().float().numpy()
