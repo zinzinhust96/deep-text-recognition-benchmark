@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
 import torch.utils.data
+import torch.nn.functional as F
 
 from utils import CTCLabelConverter, AttnLabelConverter
 from dataset import RawDataset, AlignCollate, CollateFn
@@ -49,12 +50,12 @@ def demo(opt):
     # predict
     model.eval()
     print('-' * 80)
-    print('image_path\tpredicted_labels\tElapsed time')
+    print(f'{"image_path":25s}\t{"predicted_labels":25s}\tconfidence score')
     print('-' * 80)
     # with torch.no_grad():
     for image_tensors, image_path_list in demo_loader:
-        # batch_size = image_tensors.size(0)
-        batch_size = 1
+        batch_size = image_tensors.size(0)
+        # batch_size = 2
         image = image_tensors.to(device)
         # For max length prediction
         length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
@@ -63,62 +64,34 @@ def demo(opt):
         preds_str = []
         batch_time = []
         if 'CTC' in opt.Prediction:
-            # preds = model(image, text_for_pred).log_softmax(2)
-
-            # # Select max probabilty (greedy decoding) then decode index to character
-            # preds_size = torch.IntTensor([preds.size(1)] * batch_size)
-            # _, preds_index = preds.permute(1, 0, 2).max(2)
-            # preds_index = preds_index.transpose(1, 0).contiguous().view(-1)
-            # preds_str = converter.decode(preds_index.data, preds_size.data)
-
-            # predict on each image
-            for i in range(0, image.shape[0]):
-                start_time = time.time()
-                one_img = image[i]
-                one_img = one_img[None, :, :, :]
-                pred = model(one_img, text_for_pred).log_softmax(2)
-                # print('time: ', time.time() - start_time)
+                preds = model(image, text_for_pred).log_softmax(2)
 
                 # Select max probabilty (greedy decoding) then decode index to character
-                pred_size = torch.IntTensor([pred.size(1)] * batch_size)
-                _, pred_index = pred.permute(1, 0, 2).max(2)
-                pred_index = pred_index.transpose(1, 0).contiguous().view(-1)
-                pred_str = converter.decode(pred_index.data, pred_size.data)
-
-                # add to list
-                preds_str.append(pred_str[0])
-                batch_time.append(time.time() - start_time)
-
+                preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+                _, preds_index = preds.max(2)
+                preds_index = preds_index.view(-1)
+                preds_str = converter.decode(preds_index.data, preds_size.data)
 
         else:
-            # preds = model(image, text_for_pred, is_train=False)
+            preds = model(image, text_for_pred, is_train=False)
 
-            # # select max probabilty (greedy decoding) then decode index to character
-            # _, preds_index = preds.max(2)
-            # preds_str = converter.decode(preds_index, length_for_pred)
-            # predict on each image
-            for i in range(0, image.shape[0]):
-                start_time = time.time()
-                one_img = image[i]
-                one_img = one_img[None, :, :, :]
-                pred = model(one_img, text_for_pred, is_train=False)
+            # select max probabilty (greedy decoding) then decode index to character
+            _, preds_index = preds.max(2)
+            preds_str = converter.decode(preds_index, length_for_pred)
 
-                # select max probabilty (greedy decoding) then decode index to character
-                _, pred_index = pred.max(2)
-                pred_str = converter.decode(pred_index, length_for_pred)
-
-                # add to list
-                preds_str.append(pred_str[0])
-                batch_time.append(time.time() - start_time)
-
-
-        for img_name, pred, t in zip(image_path_list, preds_str, batch_time):
+        preds_prob = F.softmax(preds, dim=2)
+        preds_max_prob, _ = preds_prob.max(dim=2)
+        for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
             if 'Attn' in opt.Prediction:
-                pred = pred[:pred.find('[s]')]  # prune after "end of sentence" token ([s])
+                pred_EOS = pred.find('[s]')
+                pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+                pred_max_prob = pred_max_prob[:pred_EOS]
 
-            print(f'{img_name}\t{pred}\t{t}')
+            # calculate confidence score (= multiply of pred_max_prob)
+            confidence_score = pred_max_prob.cumprod(dim=0)[-1]
 
-    print('Total time: ', np.sum(batch_time[1:]))
+            # print(f'{img_name}\t{pred}\t{confidence_score:0.4f}')
+            print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
 
 
 if __name__ == '__main__':
@@ -142,7 +115,7 @@ if __name__ == '__main__':
     parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. CTC|Attn')
     parser.add_argument('--num_fiducial', type=int, default=20, help='number of fiducial points of TPS-STN')
     parser.add_argument('--input_channel', type=int, default=1, help='the number of input channel of Feature extractor')
-    parser.add_argument('--output_channel', type=int, default=512,
+    parser.add_argument('--output_channel', type=int, default=256,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
 

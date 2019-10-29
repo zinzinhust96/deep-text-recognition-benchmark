@@ -56,7 +56,7 @@ def createDataset(inputPath, gtFile, outputPath, checkValid=True):
         h, w = image.shape
         ratio_list.append(w / float(h))
 
-    sorted_indexes = np.argsort(np.array(ratio_list))[::-1]
+    sorted_indexes = np.argsort(np.array(ratio_list))
 
     for i in sorted_indexes:
         print('RATIO: ', ratio_list[i])

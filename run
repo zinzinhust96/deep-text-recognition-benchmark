@@ -1,29 +1,13 @@
-CUDA_VISIBLE_DEVICES=0 python3 demo.py \
---Transformation None --FeatureExtraction ResNet --SequenceModeling None --Prediction CTC \
---image_folder demo_image/test/ \
---saved_model pretrained_model/None-ResNet-None-CTC.pth
-
-CUDA_VISIBLE_DEVICES=0 python3 demo.py \
---Transformation None --FeatureExtraction VGG --SequenceModeling BiLSTM --Prediction CTC \
---image_folder demo_image/test/ \
---saved_model pretrained_model/None-VGG-BiLSTM-CTC.pth
-
-CUDA_VISIBLE_DEVICES=0 python3 demo.py \
---Transformation None --FeatureExtraction VGG --SequenceModeling None --Prediction CTC \
---image_folder demo_image/test/ \
---saved_model pretrained_model/None-VGG-None-CTC.pth
-
-CUDA_VISIBLE_DEVICES=0 python3 demo.py \
---Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction Attn \
---image_folder demo_image/test/ \
---saved_model pretrained_model/TPS-ResNet-BiLSTM-Attn.pth
-
 ### train
-CUDA_VISIBLE_DEVICES=0 python train2.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_4 --batch_ratio 1 --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.3 --valInterval 1000 --manualSeed 6969 --batch_size 256 --continue_model TPS-ResNet-BiLSTM-CTC_0.pth --character 0123456789./- --load_level 2 --select_val_data ubd_4
+CUDA_VISIBLE_DEVICES=1 python train.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_char_num --batch_ratio 1 --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.1 --valInterval 1000 --manualSeed 11 --batch_size 256 --saved_model pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth --character 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./- --load_level 2 --select_val_data ubd_char_num --workers 6
 
-CUDA_VISIBLE_DEVICES=1 python train2.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_4 --batch_ratio 1 --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.1 --valInterval 1000 --manualSeed 1111 --batch_size 256 --continue_model pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth --character 0123456789./- --load_level 2 --select_val_data ubd_4 --PAD
+CUDA_VISIBLE_DEVICES=0 python train.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_16_10 --batch_ratio 1 --Transformation None --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.001 --adam --valInterval 1000 --manualSeed 9610 --batch_size 32 --character '年月日0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:#./-' --select_val_data ubd_16_10 --workers 6 --saved_model saved_models/None-ResNet-BiLSTM-CTC-Seed1410/model_0.pth --load_level 2
 
-CUDA_VISIBLE_DEVICES=1 python train2.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_char_num --batch_ratio 1 --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.1 --valInterval 1000 --manualSeed 11 --batch_size 256 --continue_model pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth --character 0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ./- --load_level 2 --select_val_data ubd_char_num --workers 6
+24/10
+CUDA_VISIBLE_DEVICES=0 python train.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_21_10 --batch_ratio 1 --Transformation None --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.01 --valInterval 1000 --save_iter 20000 --manualSeed 24101 --batch_size 32 --character '年月日0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:#./-' --select_val_data ubd_21_10 --workers 6 --saved_model saved_models/None-ResNet-BiLSTM-CTC-Seed2410/model_0.pth
+
+28/10
+CUDA_VISIBLE_DEVICES=0 python train.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_28_10 --batch_ratio 1 --Transformation None --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.00005 --valInterval 1000 --save_iter 20000 --manualSeed 2810 --batch_size 32 --character ' 年月日0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:#./-' --select_val_data ubd_28_10 --workers 6 --saved_model saved_models/None-ResNet-BiLSTM-CTC-Seed2810/iter_20000.pth --adam --rgb
 
 ### test
-python demo.py --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --image_folder demo_image/exp/ --saved_model saved_models/TPS-ResNet-BiLSTM-CTC-Seed6969/best_norm_ED.pth --character 0123456789./-
+python demo.py --Transformation None --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --image_folder demo_image/jpn_date/ --saved_model saved_models/None-ResNet-BiLSTM-CTC-Seed2810/best_norm_ED.pth --character ' 年月日0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:#./-' --rgb

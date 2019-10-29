@@ -322,8 +322,9 @@ class AlignCollate(object):
 
         if self.keep_ratio_with_pad:  # same concept with 'Rosetta' paper
             resized_max_w = self.imgW
-            transform = NormalizePAD((1, self.imgH, resized_max_w))
-
+            input_channel = 3 if images[0].mode == 'RGB' else 1
+            transform = NormalizePAD((input_channel, self.imgH, resized_max_w))
+           
             resized_images = []
             for image in images:
                 w, h = image.size
@@ -358,6 +359,9 @@ class CollateFn(object):
         ratio_list = np.array([image.size[0] / float(image.size[1]) for image in images])
         mean_ratio = np.mean(ratio_list)
         transform = ResizeNormalize((np.clip(int(self.imgH * mean_ratio), 40, None), self.imgH))
+        # #TODO: save padded image to inspect
+        # for index, image in enumerate(images):
+        #     save_pil_image(image, labels[index], transform, 'tps_test')
         # transform = ResizeNormalizeByHeight(height=32)
         # print(mean_ratio, int(self.imgH * mean_ratio))
         image_tensors = []
@@ -369,6 +373,12 @@ class CollateFn(object):
         image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
 
         return image_tensors, labels
+
+def save_pil_image(image, label, transform, folder_name):
+    trans_image = transform(image)
+    trans_image = transforms.ToPILImage()(trans_image)
+    print(label)
+    trans_image.save(folder_name + '/' + label.replace('demo_image/tps_test/', ''))
 
 def tensor2im(image_tensor, imtype=np.uint8):
     image_numpy = image_tensor.cpu().float().numpy()
