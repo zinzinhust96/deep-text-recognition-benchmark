@@ -205,11 +205,15 @@ def train(opt):
                 loss_log = f'[{i}/{opt.num_iter}] Train loss: {loss_avg.val():0.5f}, Valid loss: {valid_loss:0.5f}, Elapsed_time: {elapsed_time:0.5f}'
                 print(loss_log)
                 log.write(loss_log + '\n')
+                writer.add_scalar('Train loss', loss_avg.val(), i)
+                writer.add_scalar('Valid loss', valid_loss, i)
                 loss_avg.reset()
 
                 current_model_log = f'{"Current_accuracy":17s}: {current_accuracy:0.3f}, {"Current_norm_ED":17s}: {current_norm_ED:0.2f}'
                 print(current_model_log)
                 log.write(current_model_log + '\n')
+                writer.add_scalar('Valid Accuracy', current_accuracy, i)
+                writer.add_scalar('Valid Norm_ED', current_norm_ED, i)
 
                 # keep best accuracy model (on valid dataset)
                 if current_accuracy > best_accuracy:
@@ -289,7 +293,7 @@ if __name__ == '__main__':
     parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. CTC|Attn')
     parser.add_argument('--num_fiducial', type=int, default=20, help='number of fiducial points of TPS-STN')
     parser.add_argument('--input_channel', type=int, default=1, help='the number of input channel of Feature extractor')
-    parser.add_argument('--output_channel', type=int, default=256,
+    parser.add_argument('--output_channel', type=int, default=512,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
     # additional argument

@@ -64,13 +64,13 @@ def demo(opt):
         preds_str = []
         batch_time = []
         if 'CTC' in opt.Prediction:
-                preds = model(image, text_for_pred).log_softmax(2)
+            preds = model(image, text_for_pred).log_softmax(2)
 
-                # Select max probabilty (greedy decoding) then decode index to character
-                preds_size = torch.IntTensor([preds.size(1)] * batch_size)
-                _, preds_index = preds.max(2)
-                preds_index = preds_index.view(-1)
-                preds_str = converter.decode(preds_index.data, preds_size.data)
+            # Select max probabilty (greedy decoding) then decode index to character
+            preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+            _, preds_index = preds.max(2)
+            preds_index = preds_index.view(-1)
+            preds_str = converter.decode(preds_index.data, preds_size.data)
 
         else:
             preds = model(image, text_for_pred, is_train=False)
@@ -115,7 +115,7 @@ if __name__ == '__main__':
     parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. CTC|Attn')
     parser.add_argument('--num_fiducial', type=int, default=20, help='number of fiducial points of TPS-STN')
     parser.add_argument('--input_channel', type=int, default=1, help='the number of input channel of Feature extractor')
-    parser.add_argument('--output_channel', type=int, default=256,
+    parser.add_argument('--output_channel', type=int, default=512,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
 
