@@ -210,3 +210,7 @@ $RECYCLE.BIN/
 demo_image
 sign_drop*
 images*
+*eval*
+*result*
+fonts
+*test*

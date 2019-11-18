@@ -5,6 +5,7 @@ import cv2
 import re
 import time
 import numpy as np
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -14,7 +15,29 @@ import torch.nn.functional as F
 from utils import CTCLabelConverter, AttnLabelConverter
 from dataset import RawDataset, AlignCollate, CollateFn
 from model import Model
+from date_extractor.extractor import extract_dmy_from_text
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+def save_results(img_name, pred, confidence_score):
+    # Read image from path
+    img = Image.open(img_name)
+
+    # add top border to image
+    img = ImageOps.expand(img, border=(0, 0, 0, 30))
+
+    fontpath = "./fonts/TakaoExGothic.ttf"
+    font = ImageFont.truetype(fontpath, 24)
+    draw = ImageDraw.Draw(img)
+    # draw.text((x, y),"Sample Text",(r,g,b))
+    draw.text((0, img.size[1] - 30), f'{pred} - {confidence_score:0.4f}', font = font, fill = (255,255,255))
+
+    #Save image
+    _, testset_name, each_name = img_name.split('/')
+    save_path = 'test_results/' + testset_name + '/'
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    img.save(save_path + each_name + ".png")
 
 
 def demo(opt):
@@ -35,11 +58,17 @@ def demo(opt):
 
     # load model
     print('loading pretrained model from %s' % opt.saved_model)
-    model.load_state_dict(torch.load(opt.saved_model))
+    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth']
+
+    if any(model_name in opt.saved_model for model_name in best_model_names):
+        model.load_state_dict(torch.load(opt.saved_model))
+    else:
+        checkpoint = torch.load(opt.saved_model)
+        model.load_state_dict(checkpoint['model_state_dict'])
 
     # prepare data. two demo images from https://github.com/bgshih/crnn#run-demo
-    # AlignCollate_demo = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    AlignCollate_demo = CollateFn(imgH=32)
+    AlignCollate_demo = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    # AlignCollate_demo = CollateFn(imgH=32)
     demo_data = RawDataset(root=opt.image_folder, opt=opt)  # use RawDataset
     demo_loader = torch.utils.data.DataLoader(
         demo_data, batch_size=1,
@@ -81,6 +110,7 @@ def demo(opt):
 
         preds_prob = F.softmax(preds, dim=2)
         preds_max_prob, _ = preds_prob.max(dim=2)
+        # print('preds_max_prob', preds_max_prob.shape, preds_max_prob)
         for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
             if 'Attn' in opt.Prediction:
                 pred_EOS = pred.find('[s]')
@@ -93,6 +123,11 @@ def demo(opt):
             # print(f'{img_name}\t{pred}\t{confidence_score:0.4f}')
             print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
 
+            # write results image
+            save_results(img_name, pred, confidence_score)
+
+            print(extract_dmy_from_text(pred), '\n')
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -103,7 +138,7 @@ if __name__ == '__main__':
     """ Data processing """
     parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
-    parser.add_argument('--imgW', type=int, default=100, help='the width of the input image')
+    parser.add_argument('--imgW', type=int, default=256, help='the width of the input image')
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
     parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
@@ -120,6 +155,10 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
 
     opt = parser.parse_args()
+
+    # load custom character list
+    f=open("char_list.txt", "r")
+    opt.character = f.read()
 
     """ vocab / character number configuration """
     if opt.sensitive:

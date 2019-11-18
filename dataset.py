@@ -13,6 +13,7 @@ from torch.utils.data import Dataset, ConcatDataset, Subset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
 import time
+from torchvision.utils import save_image as torch_save_image
 
 
 class Batch_Balanced_Dataset(object):
@@ -27,8 +28,8 @@ class Batch_Balanced_Dataset(object):
         print(f'dataset_root: {opt.train_data}\nopt.select_data: {opt.select_data}\nopt.batch_ratio: {opt.batch_ratio}')
         assert len(opt.select_data) == len(opt.batch_ratio)
 
-        # _AlignCollate = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-        _AlignCollate = CollateFn(imgH=32)
+        _AlignCollate = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+        # _AlignCollate = CollateFn(imgH=32)
         self.data_loader_list = []
         self.dataloader_iter_list = []
         batch_size_list = []
@@ -333,10 +334,17 @@ class AlignCollate(object):
                     resized_w = self.imgW
                 else:
                     resized_w = math.ceil(self.imgH * ratio)
-
-                resized_image = image.resize((resized_w, self.imgH), Image.BICUBIC)
+                
+                # if h > self.imgH:
+                #     image.thumbnail([resized_w, self.imgH], Image.ANTIALIAS)
+                #     resized_images.append(transform(image))
+                # else:
+                resized_image = image.resize((resized_w, self.imgH), Image.BICUBIC) #ANTIALIAS
                 resized_images.append(transform(resized_image))
                 # resized_image.save('./image_test/%d_test.jpg' % w)
+            
+            # for index, image in enumerate(resized_images):
+            #     save_tensor_image(image, labels[index], 'input_test/after_transform')
 
             image_tensors = torch.cat([t.unsqueeze(0) for t in resized_images], 0)
 
@@ -374,11 +382,10 @@ class CollateFn(object):
 
         return image_tensors, labels
 
-def save_pil_image(image, label, transform, folder_name):
-    trans_image = transform(image)
-    trans_image = transforms.ToPILImage()(trans_image)
-    print(label)
-    trans_image.save(folder_name + '/' + label.replace('demo_image/tps_test/', ''))
+def save_tensor_image(image, label, folder_name):
+    label = label.split('/')[-1]
+    # print(label)
+    torch_save_image(image, './%s/%s.jpg' % (folder_name, label), normalize=True)
 
 def tensor2im(image_tensor, imtype=np.uint8):
     image_numpy = image_tensor.cpu().float().numpy()

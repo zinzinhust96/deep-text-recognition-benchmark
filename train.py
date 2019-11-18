@@ -25,8 +25,8 @@ def train(opt):
     opt.batch_ratio = opt.batch_ratio.split('-')
     train_dataset = Batch_Balanced_Dataset(opt)
 
-    # AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    AlignCollate_valid = CollateFn(imgH=32)
+    AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    # AlignCollate_valid = CollateFn(imgH=32)
     # valid_dataset = hierarchical_dataset(root=opt.valid_data, opt=opt)
     valid_dataset = hierarchical_dataset2(opt)
     valid_loader = torch.utils.data.DataLoader(
@@ -280,7 +280,7 @@ if __name__ == '__main__':
                         help='total data usage ratio, this ratio is multiplied to total number of data.')
     parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
-    parser.add_argument('--imgW', type=int, default=100, help='the width of the input image')
+    parser.add_argument('--imgW', type=int, default=256, help='the width of the input image')
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
     parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
@@ -315,6 +315,10 @@ if __name__ == '__main__':
 
     if opt.select_val_data == '':
         opt.select_val_data = opt.select_data
+
+    # load custom character list
+    f=open("char_list.txt", "r")
+    opt.character = f.read()
 
     """ vocab / character number configuration """
     if opt.sensitive:

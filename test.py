@@ -19,8 +19,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=False):
     """ evaluation with 10 benchmark evaluation datasets """
     # The evaluation datasets, dataset order is same with Table 1 in our paper.
-    eval_data_list = ['IIIT5k_3000', 'SVT', 'IC03_860', 'IC03_867', 'IC13_857',
-                      'IC13_1015', 'IC15_1811', 'IC15_2077', 'SVTP', 'CUTE80']
+    # eval_data_list = ['IIIT5k_3000', 'SVT', 'IC03_860', 'IC03_867', 'IC13_857',
+    #                   'IC13_1015', 'IC15_1811', 'IC15_2077', 'SVTP', 'CUTE80']
+    eval_data_list = ['IIIT5k_3000', 'SVT', 'IC13_857',
+                      'IC13_1015', 'IC15_2077', 'SVTP']
 
     if calculate_infer_time:
         evaluation_batch_size = 1  # batch_size should be 1 to calculate the GPU inference time per image.
@@ -121,6 +123,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         preds_max_prob, _ = preds_prob.max(dim=2)
         confidence_score_list = []
         for gt, pred, pred_max_prob in zip(labels, preds_str, preds_max_prob):
+            # pred = pred.replace('.', '').replace(' ', '')
             if 'Attn' in opt.Prediction:
                 gt = gt[:gt.find('[s]')]
                 pred_EOS = pred.find('[s]')
@@ -228,6 +231,10 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
 
     opt = parser.parse_args()
+
+    # load custom character list
+    f=open("char_list.txt", "r")
+    opt.character = f.read()
 
     """ vocab / character number configuration """
     if opt.sensitive:

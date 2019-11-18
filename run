@@ -9,5 +9,12 @@ CUDA_VISIBLE_DEVICES=0 python train.py --train_data /media/HDD/UBD/background-im
 28/10
 CUDA_VISIBLE_DEVICES=0 python train.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_28_10 --batch_ratio 1 --Transformation None --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.00005 --valInterval 1000 --save_iter 20000 --manualSeed 2810 --batch_size 32 --character ' 年月日0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:#./-' --select_val_data ubd_28_10 --workers 6 --saved_model saved_models/None-ResNet-BiLSTM-CTC-Seed2810/iter_20000.pth --adam --rgb
 
-### test
+07/11
+CUDA_VISIBLE_DEVICES=1 python train.py --train_data /media/HDD/UBD/background-images/lmdb_data/train/ --valid_data /media/HDD/UBD/background-images/lmdb_data/val/ --select_data ubd_06_11 --batch_ratio 1 --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --lr 0.0001 --valInterval 1000 --save_iter 2000 --manualSeed 0711 --batch_size 64 --select_val_data ubd_06_11 --workers 6 --adam --PAD --saved_model pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth --load_level 3
+
+### demo
 python demo.py --Transformation None --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --image_folder demo_image/jpn_date/ --saved_model saved_models/None-ResNet-BiLSTM-CTC-Seed2810/best_norm_ED.pth --character ' 年月日0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:#./-' --rgb
+CUDA_VISIBLE_DEVICES=1 python demo.py --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --image_folder demo_image/exp_aligned_crop/ --saved_model saved_models/TPS-ResNet-BiLSTM-CTC-Seed911/best_norm_ED.pth --PAD
+
+### test
+CUDA_VISIBLE_DEVICES=0 python3 test.py --eval_data data_lmdb_release/evaluation --benchmark_all_eval --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --saved_model saved_models/TPS-ResNet-BiLSTM-Attn-Seed1111/best_accuracy.pth --PAD
