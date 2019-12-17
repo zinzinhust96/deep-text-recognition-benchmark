@@ -43,8 +43,25 @@ def createDataset(inputPath, gtFile, outputPath, checkValid=True):
         datalist = data.readlines()
 
     nSamples = len(datalist)
+    print("============ ", nSamples)
+    #sort dataset based on ratio
+    # ratio_list = []
+    # for i in range(nSamples):
+    #     imagePath, label = datalist[i].strip('\n').strip(' ').split('\t')
+    #     imagePath = os.path.join(inputPath, imagePath)
+    #     if not os.path.exists(imagePath):
+    #         print('%s does not exist' % imagePath)
+    #         continue
+    #     image = cv2.imread(imagePath, 0)
+    #     h, w = image.shape
+    #     ratio_list.append(w / float(h))
+
+    # sorted_indexes = np.argsort(np.array(ratio_list))
+
+    # for i in sorted_indexes:
     for i in range(nSamples):
-        imagePath, label = datalist[i].strip('\n').split('\t')
+        # print('RATIO: ', ratio_list[i])
+        imagePath, label = datalist[i].strip('\n').strip(' ').split('\t')
         imagePath = os.path.join(inputPath, imagePath)
 
         # # only use alphanumeric data

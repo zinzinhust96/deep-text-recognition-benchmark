@@ -1,14 +1,43 @@
 import string
 import argparse
+import os
+import cv2
+import re
+import time
+import numpy as np
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 
 import torch
 import torch.backends.cudnn as cudnn
 import torch.utils.data
+import torch.nn.functional as F
 
 from utils import CTCLabelConverter, AttnLabelConverter
-from dataset import RawDataset, AlignCollate
+from dataset import RawDataset, AlignCollate, CollateFn
 from model import Model
+from date_extractor.extractor import extract_dmy_from_text
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
+def save_results(img_name, pred, confidence_score):
+    # Read image from path
+    img = Image.open(img_name)
+
+    # add top border to image
+    img = ImageOps.expand(img, border=(0, 0, 0, 30))
+
+    fontpath = "./fonts/TakaoExGothic.ttf"
+    font = ImageFont.truetype(fontpath, 24)
+    draw = ImageDraw.Draw(img)
+    # draw.text((x, y),"Sample Text",(r,g,b))
+    draw.text((0, img.size[1] - 30), f'{pred} - {confidence_score:0.4f}', font = font, fill = (255,255,255))
+
+    #Save image
+    _, testset_name, each_name = img_name.split('/')
+    save_path = 'test_results/' + testset_name + '/'
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    img.save(save_path + each_name + ".png")
 
 
 def demo(opt):
@@ -29,51 +58,75 @@ def demo(opt):
 
     # load model
     print('loading pretrained model from %s' % opt.saved_model)
-    model.load_state_dict(torch.load(opt.saved_model))
+    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth']
+
+    if any(model_name in opt.saved_model for model_name in best_model_names):
+        model.load_state_dict(torch.load(opt.saved_model))
+    else:
+        checkpoint = torch.load(opt.saved_model)
+        model.load_state_dict(checkpoint['model_state_dict'])
 
     # prepare data. two demo images from https://github.com/bgshih/crnn#run-demo
     AlignCollate_demo = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    # AlignCollate_demo = CollateFn(imgH=32)
     demo_data = RawDataset(root=opt.image_folder, opt=opt)  # use RawDataset
     demo_loader = torch.utils.data.DataLoader(
-        demo_data, batch_size=opt.batch_size,
+        demo_data, batch_size=1,
         shuffle=False,
         num_workers=int(opt.workers),
         collate_fn=AlignCollate_demo, pin_memory=True)
 
     # predict
     model.eval()
-    with torch.no_grad():
-        for image_tensors, image_path_list in demo_loader:
-            batch_size = image_tensors.size(0)
-            image = image_tensors.to(device)
-            # For max length prediction
-            length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
-            text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
+    print('-' * 80)
+    print(f'{"image_path":25s}\t{"predicted_labels":25s}\tconfidence score')
+    print('-' * 80)
+    # with torch.no_grad():
+    for image_tensors, image_path_list in demo_loader:
+        batch_size = image_tensors.size(0)
+        # batch_size = 2
+        image = image_tensors.to(device)
+        # For max length prediction
+        length_for_pred = torch.IntTensor([opt.batch_max_length] * batch_size).to(device)
+        text_for_pred = torch.LongTensor(batch_size, opt.batch_max_length + 1).fill_(0).to(device)
 
-            if 'CTC' in opt.Prediction:
-                preds = model(image, text_for_pred).log_softmax(2)
+        preds_str = []
+        batch_time = []
+        if 'CTC' in opt.Prediction:
+            preds = model(image, text_for_pred).log_softmax(2)
 
-                # Select max probabilty (greedy decoding) then decode index to character
-                preds_size = torch.IntTensor([preds.size(1)] * batch_size)
-                _, preds_index = preds.permute(1, 0, 2).max(2)
-                preds_index = preds_index.transpose(1, 0).contiguous().view(-1)
-                preds_str = converter.decode(preds_index.data, preds_size.data)
+            # Select max probabilty (greedy decoding) then decode index to character
+            preds_size = torch.IntTensor([preds.size(1)] * batch_size)
+            _, preds_index = preds.max(2)
+            preds_index = preds_index.view(-1)
+            preds_str = converter.decode(preds_index.data, preds_size.data)
 
-            else:
-                preds = model(image, text_for_pred, is_train=False)
+        else:
+            preds = model(image, text_for_pred, is_train=False)
 
-                # select max probabilty (greedy decoding) then decode index to character
-                _, preds_index = preds.max(2)
-                preds_str = converter.decode(preds_index, length_for_pred)
+            # select max probabilty (greedy decoding) then decode index to character
+            _, preds_index = preds.max(2)
+            preds_str = converter.decode(preds_index, length_for_pred)
 
-            print('-' * 80)
-            print('image_path\tpredicted_labels')
-            print('-' * 80)
-            for img_name, pred in zip(image_path_list, preds_str):
-                if 'Attn' in opt.Prediction:
-                    pred = pred[:pred.find('[s]')]  # prune after "end of sentence" token ([s])
+        preds_prob = F.softmax(preds, dim=2)
+        preds_max_prob, _ = preds_prob.max(dim=2)
+        # print('preds_max_prob', preds_max_prob.shape, preds_max_prob)
+        for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
+            if 'Attn' in opt.Prediction:
+                pred_EOS = pred.find('[s]')
+                pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
+                pred_max_prob = pred_max_prob[:pred_EOS]
 
-                print(f'{img_name}\t{pred}')
+            # calculate confidence score (= multiply of pred_max_prob)
+            confidence_score = pred_max_prob.cumprod(dim=0)[-1]
+
+            # print(f'{img_name}\t{pred}\t{confidence_score:0.4f}')
+            print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
+
+            # write results image
+            save_results(img_name, pred, confidence_score)
+
+            print(extract_dmy_from_text(pred), '\n')
 
 
 if __name__ == '__main__':
@@ -85,7 +138,7 @@ if __name__ == '__main__':
     """ Data processing """
     parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
-    parser.add_argument('--imgW', type=int, default=100, help='the width of the input image')
+    parser.add_argument('--imgW', type=int, default=256, help='the width of the input image')
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
     parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
@@ -103,6 +156,10 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
 
+    # load custom character list
+    f=open("char_list.txt", "r")
+    opt.character = f.read()
+
     """ vocab / character number configuration """
     if opt.sensitive:
         opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
@@ -110,5 +167,7 @@ if __name__ == '__main__':
     cudnn.benchmark = True
     cudnn.deterministic = True
     opt.num_gpu = torch.cuda.device_count()
+
+    print('PADDING: ', opt.PAD)
 
     demo(opt)

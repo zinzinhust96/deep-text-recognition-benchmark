@@ -12,6 +12,8 @@ import numpy as np
 from torch.utils.data import Dataset, ConcatDataset, Subset
 from torch._utils import _accumulate
 import torchvision.transforms as transforms
+import time
+from torchvision.utils import save_image as torch_save_image
 
 
 class Batch_Balanced_Dataset(object):
@@ -27,6 +29,7 @@ class Batch_Balanced_Dataset(object):
         assert len(opt.select_data) == len(opt.batch_ratio)
 
         _AlignCollate = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+        # _AlignCollate = CollateFn(imgH=32)
         self.data_loader_list = []
         self.dataloader_iter_list = []
         batch_size_list = []
@@ -54,7 +57,7 @@ class Batch_Balanced_Dataset(object):
 
             _data_loader = torch.utils.data.DataLoader(
                 _dataset, batch_size=_batch_size,
-                shuffle=True,
+                shuffle=False,
                 num_workers=int(opt.workers),
                 collate_fn=_AlignCollate, pin_memory=True)
             self.data_loader_list.append(_data_loader)
@@ -107,6 +110,36 @@ def hierarchical_dataset(root, opt, select_data='/'):
 
     return concatenated_dataset
 
+def hierarchical_dataset2(opt):
+    dataset_list = []
+    select_data = opt.select_val_data.split('-')
+    print(f'dataset_root:    {opt.valid_data}')
+    for data in select_data:
+        dirpath = os.path.join(opt.valid_data, data)
+        dataset = LmdbDataset(dirpath, opt)
+        print(f'sub-directory:\t/{data}\t num samples: {len(dataset)}')
+        dataset_list.append(dataset)
+
+    concatenated_dataset = ConcatDataset(dataset_list)
+
+    return concatenated_dataset
+
+
+class SortedDataset(Dataset):
+    def __init__(self, dataset):
+        self.nSamples = len(dataset)
+        ratio_list = [image.size[0] / float(image.size[1]) for (image, label) in dataset]
+        sorted_indexes = np.argsort(np.array(ratio_list))
+        self.sorted_dataset = [dataset[i] for i in sorted_indexes]
+
+    def __len__(self):
+        return self.nSamples
+
+    def __getitem__(self, index):
+
+        (image, label) = self.sorted_dataset[index]
+
+        return (image, label)
 
 class LmdbDataset(Dataset):
 
@@ -240,6 +273,22 @@ class ResizeNormalize(object):
         img.sub_(0.5).div_(0.5)
         return img
 
+class ResizeNormalizeByHeight(object):
+
+    def __init__(self, height = None, interpolation=Image.BICUBIC):
+        self.height = height
+        self.interpolation = interpolation
+        self.toTensor = transforms.ToTensor()
+
+    def __call__(self, img):
+        w, h = img.size
+        ratio = w / float(h)
+        size = (int(self.height * ratio), self.height)
+        img = img.resize(size, self.interpolation)
+        img = self.toTensor(img)
+        img.sub_(0.5).div_(0.5)
+        return img
+
 
 class NormalizePAD(object):
 
@@ -274,8 +323,9 @@ class AlignCollate(object):
 
         if self.keep_ratio_with_pad:  # same concept with 'Rosetta' paper
             resized_max_w = self.imgW
-            transform = NormalizePAD((1, self.imgH, resized_max_w))
-
+            input_channel = 3 if images[0].mode == 'RGB' else 1
+            transform = NormalizePAD((input_channel, self.imgH, resized_max_w))
+           
             resized_images = []
             for image in images:
                 w, h = image.size
@@ -284,10 +334,17 @@ class AlignCollate(object):
                     resized_w = self.imgW
                 else:
                     resized_w = math.ceil(self.imgH * ratio)
-
-                resized_image = image.resize((resized_w, self.imgH), Image.BICUBIC)
+                
+                # if h > self.imgH:
+                #     image.thumbnail([resized_w, self.imgH], Image.ANTIALIAS)
+                #     resized_images.append(transform(image))
+                # else:
+                resized_image = image.resize((resized_w, self.imgH), Image.BICUBIC) #ANTIALIAS
                 resized_images.append(transform(resized_image))
                 # resized_image.save('./image_test/%d_test.jpg' % w)
+            
+            # for index, image in enumerate(resized_images):
+            #     save_tensor_image(image, labels[index], 'input_test/after_transform')
 
             image_tensors = torch.cat([t.unsqueeze(0) for t in resized_images], 0)
 
@@ -298,6 +355,37 @@ class AlignCollate(object):
 
         return image_tensors, labels
 
+class CollateFn(object):
+
+    def __init__(self, imgH):
+        self.imgH = imgH
+
+    def __call__(self, batch):
+        batch = filter(lambda x: x is not None, batch)
+        images, labels = zip(*batch)
+
+        ratio_list = np.array([image.size[0] / float(image.size[1]) for image in images])
+        mean_ratio = np.mean(ratio_list)
+        transform = ResizeNormalize((np.clip(int(self.imgH * mean_ratio), 40, None), self.imgH))
+        # #TODO: save padded image to inspect
+        # for index, image in enumerate(images):
+        #     save_pil_image(image, labels[index], transform, 'tps_test')
+        # transform = ResizeNormalizeByHeight(height=32)
+        # print(mean_ratio, int(self.imgH * mean_ratio))
+        image_tensors = []
+        for image in images:    
+            image_tensor = transform(image)
+            # print(image_tensor.size())
+            image_tensors.append(image_tensor)
+
+        image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
+
+        return image_tensors, labels
+
+def save_tensor_image(image, label, folder_name):
+    label = label.split('/')[-1]
+    # print(label)
+    torch_save_image(image, './%s/%s.jpg' % (folder_name, label), normalize=True)
 
 def tensor2im(image_tensor, imtype=np.uint8):
     image_numpy = image_tensor.cpu().float().numpy()
