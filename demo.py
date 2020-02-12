@@ -19,7 +19,7 @@ from date_extractor.extractor import extract_dmy_from_text
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def save_results(img_name, pred, confidence_score):
+def save_results(img_name, model_name, pred, confidence_score):
     # Read image from path
     img = Image.open(img_name)
 
@@ -33,8 +33,10 @@ def save_results(img_name, pred, confidence_score):
     draw.text((0, img.size[1] - 30), f'{pred} - {confidence_score:0.4f}', font = font, fill = (255,255,255))
 
     #Save image
-    _, testset_name, each_name = img_name.split('/')
-    save_path = 'test_results/' + testset_name + '/'
+    print('img_name: ', img_name)
+    _, testset_name, each_name = img_name.split('/')[-3:]
+    save_path = 'test_results/' + testset_name + '_' + model_name + '/'
+    print('SAVE PATH: ', save_path)
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     img.save(save_path + each_name + ".png")
@@ -58,7 +60,7 @@ def demo(opt):
 
     # load model
     print('loading pretrained model from %s' % opt.saved_model)
-    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth']
+    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth', 'best_valid_loss.pth', 'TPS-ResNet-BiLSTM-CTC.pth']
 
     if any(model_name in opt.saved_model for model_name in best_model_names):
         model.load_state_dict(torch.load(opt.saved_model))
@@ -71,7 +73,7 @@ def demo(opt):
     # AlignCollate_demo = CollateFn(imgH=32)
     demo_data = RawDataset(root=opt.image_folder, opt=opt)  # use RawDataset
     demo_loader = torch.utils.data.DataLoader(
-        demo_data, batch_size=1,
+        demo_data, batch_size=16,
         shuffle=False,
         num_workers=int(opt.workers),
         collate_fn=AlignCollate_demo, pin_memory=True)
@@ -99,19 +101,26 @@ def demo(opt):
             preds_size = torch.IntTensor([preds.size(1)] * batch_size)
             _, preds_index = preds.max(2)
             preds_index = preds_index.view(-1)
-            preds_str = converter.decode(preds_index.data, preds_size.data)
 
         else:
             preds = model(image, text_for_pred, is_train=False)
 
             # select max probabilty (greedy decoding) then decode index to character
             _, preds_index = preds.max(2)
-            preds_str = converter.decode(preds_index, length_for_pred)
 
         preds_prob = F.softmax(preds, dim=2)
         preds_max_prob, _ = preds_prob.max(dim=2)
         # print('preds_max_prob', preds_max_prob.shape, preds_max_prob)
-        for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
+
+        # decode sequence of token
+        if 'CTC' in opt.Prediction:
+            preds_str, preds_score, raws_str = converter.decode_with_threshold(preds_index.data, preds_size.data, preds_max_prob)
+            # print('raws_str', np.array(raws_str).shape, raws_str)
+
+        else:
+            preds_str = converter.decode(preds_index, length_for_pred)
+
+        for img_name, pred, pred_score, raw_str, pred_max_prob in zip(image_path_list, preds_str, preds_score, raws_str, preds_max_prob):
             if 'Attn' in opt.Prediction:
                 pred_EOS = pred.find('[s]')
                 pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
@@ -123,10 +132,26 @@ def demo(opt):
             # print(f'{img_name}\t{pred}\t{confidence_score:0.4f}')
             print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
 
-            # write results image
-            save_results(img_name, pred, confidence_score)
+            '''
+            print('===== confident score for each token =====')
+            for token, score in zip(raw_str, pred_max_prob):
+                print(token, '\t', score.item())
 
-            print(extract_dmy_from_text(pred), '\n')
+            print('\n')            
+            # '''
+
+            '''
+            print('===== confident score for final set of token =====')
+            for token, score in zip(pred, pred_score):
+                print(token, '\t', score.item())
+
+            print('\n')            
+            # '''
+
+            # write results image
+            save_results(img_name, model_name = opt.saved_model.split('/')[1].split('-')[-1] , pred = pred, confidence_score = confidence_score)
+
+            # print(extract_dmy_from_text(pred), '\n')
 
 
 if __name__ == '__main__':
@@ -138,7 +163,7 @@ if __name__ == '__main__':
     """ Data processing """
     parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
-    parser.add_argument('--imgW', type=int, default=256, help='the width of the input image')
+    parser.add_argument('--imgW', type=int, default=128, help='the width of the input image')
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
     parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')

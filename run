@@ -17,4 +17,4 @@ python demo.py --Transformation None --FeatureExtraction ResNet --SequenceModeli
 CUDA_VISIBLE_DEVICES=1 python demo.py --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --image_folder demo_image/exp_aligned_crop/ --saved_model saved_models/TPS-ResNet-BiLSTM-CTC-Seed911/best_norm_ED.pth --PAD
 
 ### test
-CUDA_VISIBLE_DEVICES=0 python3 test.py --eval_data data_lmdb_release/evaluation --benchmark_all_eval --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --saved_model saved_models/TPS-ResNet-BiLSTM-Attn-Seed1111/best_accuracy.pth --PAD
+CUDA_VISIBLE_DEVICES=1 python3 test.py --eval_data /projects/OCR/deep-text-recognition-benchmark/lmdb_data/eval --Transformation TPS --FeatureExtraction ResNet --SequenceModeling BiLSTM --Prediction CTC --saved_model saved_models/TPS-ResNet-BiLSTM-CTC-Seed2311/best_norm_ED.pth --PAD --hidden_size 512

@@ -49,6 +49,39 @@ class CTCLabelConverter(object):
             index += l
         return texts
 
+    def decode_with_threshold(self, text_index, length, preds_max_prob):
+        """ convert text-index into text-label. """
+        texts = []
+        texts_score = []
+        raws = []
+        index = 0
+        for i, l in enumerate(length):
+            t = text_index[index:index + l]
+            preds_max_prob_each = preds_max_prob[i]
+
+            # log raw tokens into an array
+            raw_list = []
+            for i in range(l):
+                raw_list.append(self.character[t[i]])
+
+            # remove detected token with low confident score
+            # CONFIDENT_THRESHOLD = 0.90
+            # t = [c for i, c in enumerate(t) if preds_max_prob_each[i] > CONFIDENT_THRESHOLD or self.character[c] == '[blank]']
+
+            char_list = []
+            score_list = []
+            for i in range(len(t)):
+                if t[i] != 0 and (not (i > 0 and t[i - 1] == t[i])):  # removing repeated characters and blank.
+                    char_list.append(self.character[t[i]])
+                    score_list.append(preds_max_prob_each[i])
+            text = ''.join(char_list)
+
+            texts.append(text)
+            texts_score.append(score_list)
+            raws.append(raw_list)
+            index += l
+        return texts, texts_score, raws
+
 
 class AttnLabelConverter(object):
     """ Convert between text-label and text-index """

@@ -13,6 +13,8 @@ from nltk.metrics.distance import edit_distance
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
 from dataset import hierarchical_dataset, AlignCollate
 from model import Model
+import scipy.misc
+from torchvision.utils import save_image as torch_save_image
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -69,13 +71,14 @@ def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=Fa
     return None
 
 
-def validation(model, criterion, evaluation_loader, converter, opt):
+def validation(model, criterion, evaluation_loader, converter, opt, isErrorAnalyze = False):
     """ validation or evaluation """
     n_correct = 0
     norm_ED = 0
     length_of_data = 0
     infer_time = 0
     valid_loss_avg = Averager()
+    incorrect_list = []
 
     for i, (image_tensors, labels) in enumerate(evaluation_loader):
         batch_size = image_tensors.size(0)
@@ -122,7 +125,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         preds_prob = F.softmax(preds, dim=2)
         preds_max_prob, _ = preds_prob.max(dim=2)
         confidence_score_list = []
-        for gt, pred, pred_max_prob in zip(labels, preds_str, preds_max_prob):
+        for gt, pred, pred_max_prob, image_tensor in zip(labels, preds_str, preds_max_prob, image):
             # pred = pred.replace('.', '').replace(' ', '')
             if 'Attn' in opt.Prediction:
                 gt = gt[:gt.find('[s]')]
@@ -132,6 +135,22 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 
             if pred == gt:
                 n_correct += 1
+            elif isErrorAnalyze:
+                if len(incorrect_list) < 100 :
+                    incorrect_list.append({
+                        'index': len(incorrect_list),
+                        'pred': pred,
+                        'gt': gt
+                    })
+                    folder_path = 'test_results/evaluation_{}'.format(opt.saved_model.split('/')[1].split('-')[-1])
+                    if not os.path.exists(folder_path):
+                        os.makedirs(folder_path)
+                    torch_save_image(image_tensor, '{}/{}.jpg'.format(folder_path, len(incorrect_list) - 1), normalize=True)
+                    # image_numpy = image_tensor.cpu().numpy()
+                    # image_numpy = image_numpy.reshape(opt.imgH, opt.imgW)
+                    # im = Image.fromarray(image_numpy).convert("L")
+                    # im.save('test_results/evaluation_seed/{}.jpg'.format(len(incorrect_list) - 1))
+                    # scipy.misc.imsave('{}/{}.jpg'.format(folder_path, len(incorrect_list) - 1), image_numpy)
             if len(gt) == 0:
                 norm_ED += 1
             else:
@@ -147,7 +166,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 
     accuracy = n_correct / float(length_of_data) * 100
 
-    return valid_loss_avg.val(), accuracy, norm_ED, preds_str, confidence_score_list, labels, infer_time, length_of_data
+    return valid_loss_avg.val(), accuracy, norm_ED, preds_str, confidence_score_list, labels, infer_time, length_of_data, incorrect_list
 
 
 def test(opt):
@@ -166,9 +185,16 @@ def test(opt):
           opt.SequenceModeling, opt.Prediction)
     model = torch.nn.DataParallel(model).to(device)
 
-    # load model
+     # load model
     print('loading pretrained model from %s' % opt.saved_model)
-    model.load_state_dict(torch.load(opt.saved_model))
+    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth', 'best_valid_loss.pth']
+
+    if any(model_name in opt.saved_model for model_name in best_model_names):
+        model.load_state_dict(torch.load(opt.saved_model))
+    else:
+        checkpoint = torch.load(opt.saved_model)
+        model.load_state_dict(checkpoint['model_state_dict'])
+
     opt.experiment_name = '_'.join(opt.saved_model.split('/')[1:])
     # print(model)
 
@@ -195,10 +221,13 @@ def test(opt):
                 shuffle=False,
                 num_workers=int(opt.workers),
                 collate_fn=AlignCollate_evaluation, pin_memory=True)
-            _, accuracy_by_best_model, _, _, _, _, _, _ = validation(
-                model, criterion, evaluation_loader, converter, opt)
+            _, accuracy_by_best_model, _, _, _, _, _, _, incorrect_list = validation(
+                model, criterion, evaluation_loader, converter, opt, isErrorAnalyze=True)
 
             print(accuracy_by_best_model)
+            print(f'{"index":25s}\t{"prediction":25s}\t{"ground truth":25s}')
+            for incorrect in incorrect_list:
+                print(f'{incorrect["index"]:25d}\t{incorrect["pred"]:25s}\t{incorrect["gt"]:25s}')
             with open('./result/{0}/log_evaluation.txt'.format(opt.experiment_name), 'a') as log:
                 log.write(str(accuracy_by_best_model) + '\n')
 
@@ -208,12 +237,12 @@ if __name__ == '__main__':
     parser.add_argument('--eval_data', required=True, help='path to evaluation dataset')
     parser.add_argument('--benchmark_all_eval', action='store_true', help='evaluate 10 benchmark evaluation datasets')
     parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
-    parser.add_argument('--batch_size', type=int, default=192, help='input batch size')
+    parser.add_argument('--batch_size', type=int, default=256, help='input batch size')
     parser.add_argument('--saved_model', required=True, help="path to saved_model to evaluation")
     """ Data processing """
     parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
-    parser.add_argument('--imgW', type=int, default=100, help='the width of the input image')
+    parser.add_argument('--imgW', type=int, default=256, help='the width of the input image')
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
     parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')

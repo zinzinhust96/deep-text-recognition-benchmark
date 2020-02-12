@@ -69,13 +69,10 @@ def train(opt):
     # data parallel for multi-GPU
     model = torch.nn.DataParallel(model).to(device)
     model_state_dict = model.state_dict()
+    pretrained_model_names = ['best_norm_ED', 'best_accuracy', 'best_valid_loss', 'pretrained']
     if opt.saved_model != '':
         print('loading pretrained model from {}'.format(opt.saved_model))
-        if opt.saved_model in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-VGG-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-ResNet-None-CTC_0.pth',
-                                    'saved_models/None-ResNet-BiLSTM-CTC-Seed1410/model_0.pth'
-                                    ]:
+        if any(name in opt.saved_model for name in pretrained_model_names):
             pretrained_dict = torch.load(opt.saved_model)
         else:
             checkpoint = torch.load(opt.saved_model)
@@ -83,10 +80,10 @@ def train(opt):
             pretrained_dict = checkpoint['model_state_dict']
         
         level = ['Transformation', 'FeatureExtraction', 'SequenceModeling', 'Prediction']
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k.split('.')[1] in level[:opt.load_level]}
         # print('=================== pretrained state dict ===================')
         # for param_tensor in pretrained_dict:
-        #     print(param_tensor, "\t", pretrained_dict[param_tensor].size())
+        #     print(param_tensor, "\t", 'pretrained_dict[param_tensor].size()')
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k.split('.')[1] in level[:opt.load_level]}
         model_state_dict.update(pretrained_dict)
         # for param_tensor in model_state_dict:
         #     print(param_tensor, "\t", model_state_dict[param_tensor].size())
@@ -124,11 +121,8 @@ def train(opt):
         optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
     print("Optimizer: ", optimizer)
     if opt.saved_model != '':
-        if opt.saved_model not in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-VGG-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-ResNet-None-CTC_0.pth',
-                                    'saved_models/None-ResNet-BiLSTM-CTC-Seed1410/model_0.pth'
-                                    ]:
+        if not any(name in opt.saved_model for name in pretrained_model_names):
+            print('=====LOAD OPTIMIZER')
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     """ final options """
@@ -152,6 +146,7 @@ def train(opt):
     start_time = time.time()
     best_accuracy = -1
     best_norm_ED = 1e+6
+    best_valid_loss = 1e+6
     i = start_iter
 
     while(True):
@@ -197,8 +192,8 @@ def train(opt):
             with open(f'./saved_models/{opt.experiment_name}/log_train.txt', 'a') as log:
                 model.eval()
                 with torch.no_grad():
-                    valid_loss, current_accuracy, current_norm_ED, preds, confidence_score, labels, infer_time, length_of_data = validation(
-                        model, criterion, valid_loader, converter, opt)
+                    valid_loss, current_accuracy, current_norm_ED, preds, confidence_score, labels, infer_time, length_of_data, _ = validation(
+                        model, criterion, valid_loader, converter, opt, isErrorAnalyze=False)
                 model.train()
 
                 # training loss and validation loss
@@ -209,7 +204,7 @@ def train(opt):
                 writer.add_scalar('Valid loss', valid_loss, i)
                 loss_avg.reset()
 
-                current_model_log = f'{"Current_accuracy":17s}: {current_accuracy:0.3f}, {"Current_norm_ED":17s}: {current_norm_ED:0.2f}'
+                current_model_log = f'{"Current_accuracy":17s}: {current_accuracy:0.3f}, {"Current_norm_ED":17s}: {current_norm_ED:0.2f}, {"Current_valid_loss":17s}: {valid_loss:0.5f}'
                 print(current_model_log)
                 log.write(current_model_log + '\n')
                 writer.add_scalar('Valid Accuracy', current_accuracy, i)
@@ -222,7 +217,10 @@ def train(opt):
                 if current_norm_ED < best_norm_ED:
                     best_norm_ED = current_norm_ED
                     torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_norm_ED.pth')
-                best_model_log = f'{"Best_accuracy":17s}: {best_accuracy:0.3f}, {"Best_norm_ED":17s}: {best_norm_ED:0.2f}'
+                if valid_loss < best_valid_loss:
+                    best_valid_loss = valid_loss
+                    torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_valid_loss.pth')
+                best_model_log = f'{"Best_accuracy":17s}: {best_accuracy:0.3f}, {"Best_norm_ED":17s}: {best_norm_ED:0.2f}, {"Best_valid_loss":17s}: {best_valid_loss:0.5f}'
                 print(best_model_log)
                 log.write(best_model_log + '\n')
 
@@ -280,7 +278,7 @@ if __name__ == '__main__':
                         help='total data usage ratio, this ratio is multiplied to total number of data.')
     parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
-    parser.add_argument('--imgW', type=int, default=256, help='the width of the input image')
+    parser.add_argument('--imgW', type=int, default=128, help='the width of the input image')
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
     parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
@@ -317,7 +315,7 @@ if __name__ == '__main__':
         opt.select_val_data = opt.select_data
 
     # load custom character list
-    f=open("char_list.txt", "r")
+    f=open("char_list_sakai.txt", "r")
     opt.character = f.read()
 
     """ vocab / character number configuration """
