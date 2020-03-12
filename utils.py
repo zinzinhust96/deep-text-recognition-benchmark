@@ -1,4 +1,5 @@
 import torch
+from random import randint
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -118,3 +119,13 @@ class Averager(object):
         if self.n_count != 0:
             res = self.sum / float(self.n_count)
         return res
+
+def crop_image_with_pad(img, min_pad=5, max_pad=10):
+    w, h = img.size
+    top_pad = randint(min_pad, max_pad)
+    bottom_pad = randint(min_pad, max_pad)
+    left_pad = randint(min_pad, max_pad)
+    right_pad = randint(min_pad, max_pad)
+    area = (max_pad - left_pad, max_pad - top_pad, w - (max_pad - right_pad), h - (max_pad - bottom_pad))
+    cropped_img = img.crop(area)
+    return cropped_img

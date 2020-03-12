@@ -207,7 +207,7 @@ $RECYCLE.BIN/
 # Windows shortcuts
 *.lnk
 
-demo_image
+input_images
 sign_drop*
 images*
 *eval*

@@ -20,6 +20,8 @@ from modules.transformation import TPS_SpatialTransformerNetwork
 from modules.feature_extraction import VGG_FeatureExtractor, RCNN_FeatureExtractor, ResNet_FeatureExtractor
 from modules.sequence_modeling import BidirectionalLSTM
 from modules.prediction import Attention
+from dataset import save_tensor_image
+import os
 
 
 class Model(nn.Module):
@@ -67,10 +69,13 @@ class Model(nn.Module):
         else:
             raise Exception('Prediction is neither CTC or Attn')
 
-    def forward(self, input, text, is_train=True):
+    def forward(self, input, text, index=-1, is_train=True):
         """ Transformation stage """
         if not self.stages['Trans'] == "None":
             input = self.Transformation(input)
+            # if index > -1:
+            #     folder_name = self.opt.image_folder.split('/')[-1]
+            #     save_tensor_image(input, label=str(index), folder_name=os.path.join('input_test', folder_name))
 
         """ Feature extraction stage """
         visual_feature = self.FeatureExtraction(input)

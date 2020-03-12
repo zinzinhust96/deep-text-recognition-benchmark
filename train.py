@@ -14,28 +14,35 @@ from tensorboardX import SummaryWriter
 import numpy as np
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, hierarchical_dataset2, AlignCollate, Batch_Balanced_Dataset, CollateFn
+from dataset import hierarchical_dataset, AlignCollate, Batch_Balanced_Dataset, CollateFn
 from model import Model
 from test import validation
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def train(opt):
     """ dataset preparation """
+    if not opt.data_filtering_off:
+        print('Filtering the images containing characters which are not in opt.character')
+        print('Filtering the images whose label is longer than opt.batch_max_length')
+        # see https://github.com/clovaai/deep-text-recognition-benchmark/blob/6593928855fb7abb999a99f428b3e4477d4ae356/dataset.py#L130
+
     opt.select_data = opt.select_data.split('-')
     opt.batch_ratio = opt.batch_ratio.split('-')
     train_dataset = Batch_Balanced_Dataset(opt)
 
+    log = open(f'./saved_models/{opt.experiment_name}/log_dataset.txt', 'a')
     AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    # AlignCollate_valid = CollateFn(imgH=32)
-    # valid_dataset = hierarchical_dataset(root=opt.valid_data, opt=opt)
-    valid_dataset = hierarchical_dataset2(opt)
+    valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt, select_data=opt.select_data)
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
-        shuffle=False,  # 'True' to check training progress with validation function.
+        shuffle=True,  # 'True' to check training progress with validation function.
         num_workers=int(opt.workers),
         collate_fn=AlignCollate_valid, pin_memory=True)
+    log.write(valid_dataset_log)
     print('-' * 80)
-
+    log.write('-' * 80 + '\n')
+    log.close()
+    
     """ model configuration """
     if 'CTC' in opt.Prediction:
         converter = CTCLabelConverter(opt.character)
@@ -69,13 +76,10 @@ def train(opt):
     # data parallel for multi-GPU
     model = torch.nn.DataParallel(model).to(device)
     model_state_dict = model.state_dict()
+    pretrained_model_names = ['best_norm_ED', 'best_accuracy', 'best_valid_loss', 'pretrained', 'TPS-ResNet-BiLSTM-CTC']
     if opt.saved_model != '':
         print('loading pretrained model from {}'.format(opt.saved_model))
-        if opt.saved_model in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-VGG-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-ResNet-None-CTC_0.pth',
-                                    'saved_models/None-ResNet-BiLSTM-CTC-Seed1410/model_0.pth'
-                                    ]:
+        if any(name in opt.saved_model for name in pretrained_model_names):
             pretrained_dict = torch.load(opt.saved_model)
         else:
             checkpoint = torch.load(opt.saved_model)
@@ -124,11 +128,8 @@ def train(opt):
         optimizer = optim.Adadelta(filtered_parameters, lr=opt.lr, rho=opt.rho, eps=opt.eps)
     print("Optimizer: ", optimizer)
     if opt.saved_model != '':
-        if opt.saved_model not in ['pretrained_model/TPS-ResNet-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-VGG-BiLSTM-CTC_0.pth',
-                                    'pretrained_model/None-ResNet-None-CTC_0.pth',
-                                    'saved_models/None-ResNet-BiLSTM-CTC-Seed1410/model_0.pth'
-                                    ]:
+        if not any(name in opt.saved_model for name in pretrained_model_names):
+            print('=====LOAD OPTIMIZER')
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     """ final options """
@@ -146,12 +147,16 @@ def train(opt):
     model.train()
     start_iter = 0
     if opt.saved_model != '':
-        start_iter = int(opt.saved_model.split('_')[-1].split('.')[0])
-        print(f'continue to train, start_iter: {start_iter}')
+        try:
+            start_iter = int(opt.saved_model.split('_')[-1].split('.')[0])
+            print(f'continue to train, start_iter: {start_iter}')
+        except:
+            pass
 
     start_time = time.time()
     best_accuracy = -1
-    best_norm_ED = 1e+6
+    best_norm_ED = -1
+    best_valid_loss = 1e+6
     i = start_iter
 
     while(True):
@@ -209,7 +214,7 @@ def train(opt):
                 writer.add_scalar('Valid loss', valid_loss, i)
                 loss_avg.reset()
 
-                current_model_log = f'{"Current_accuracy":17s}: {current_accuracy:0.3f}, {"Current_norm_ED":17s}: {current_norm_ED:0.2f}'
+                current_model_log = f'{"Current_accuracy":17s}: {current_accuracy:0.3f}, {"Current_norm_ED":17s}: {current_norm_ED:0.2f}, {"Current_val_loss":17s}: {valid_loss:0.5f}'
                 print(current_model_log)
                 log.write(current_model_log + '\n')
                 writer.add_scalar('Valid Accuracy', current_accuracy, i)
@@ -219,26 +224,31 @@ def train(opt):
                 if current_accuracy > best_accuracy:
                     best_accuracy = current_accuracy
                     torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_accuracy.pth')
-                if current_norm_ED < best_norm_ED:
+                if current_norm_ED > best_norm_ED:
                     best_norm_ED = current_norm_ED
                     torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_norm_ED.pth')
-                best_model_log = f'{"Best_accuracy":17s}: {best_accuracy:0.3f}, {"Best_norm_ED":17s}: {best_norm_ED:0.2f}'
-                print(best_model_log)
-                log.write(best_model_log + '\n')
+                if valid_loss < best_valid_loss:
+                    best_valid_loss = valid_loss
+                    torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_valid_loss.pth')
+                best_model_log = f'{"Best_accuracy":17s}: {best_accuracy:0.3f}, {"Best_norm_ED":17s}: {best_norm_ED:0.2f}, , {"Best_val_loss":17s}: {best_valid_loss:0.5f}'
+
+                loss_model_log = f'{loss_log}\n{current_model_log}\n{best_model_log}'
+                print(loss_model_log)
+                log.write(loss_model_log + '\n')
 
                 # show some predicted results
-                print('-' * 80)
-                print(f'{"Ground Truth":25s} | {"Prediction":25s} | Confidence Score & T/F')
-                log.write(f'{"Ground Truth":25s} | {"Prediction":25s} | {"Confidence Score"}\n')
-                print('-' * 80)
+                dashed_line = '-' * 80
+                head = f'{"Ground Truth":25s} | {"Prediction":25s} | Confidence Score & T/F'
+                predicted_result_log = f'{dashed_line}\n{head}\n{dashed_line}\n'
                 for gt, pred, confidence in zip(labels[:5], preds[:5], confidence_score[:5]):
                     if 'Attn' in opt.Prediction:
                         gt = gt[:gt.find('[s]')]
                         pred = pred[:pred.find('[s]')]
 
-                    print(f'{gt:25s} | {pred:25s} | {confidence:0.4f}\t{str(pred == gt)}')
-                    log.write(f'{gt:25s} | {pred:25s} | {confidence:0.4f}\t{str(pred == gt)}\n')
-                print('-' * 80)
+                    predicted_result_log += f'{gt:25s} | {pred:25s} | {confidence:0.4f}\t{str(pred == gt)}\n'
+                predicted_result_log += f'{dashed_line}'
+                print(predicted_result_log)
+                log.write(predicted_result_log + '\n')
 
         # save model per 1e+5 iter.
         if (i + 1) % opt.save_iter == 0:
@@ -282,17 +292,20 @@ if __name__ == '__main__':
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')
     parser.add_argument('--imgW', type=int, default=256, help='the width of the input image')
     parser.add_argument('--rgb', action='store_true', help='use rgb input')
-    parser.add_argument('--character', type=str, default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
+    parser.add_argument('--character', type=str,
+                        default='0123456789abcdefghijklmnopqrstuvwxyz', help='character label')
     parser.add_argument('--sensitive', action='store_true', help='for sensitive character mode')
     parser.add_argument('--PAD', action='store_true', help='whether to keep ratio then pad for image resize')
     parser.add_argument('--data_filtering_off', action='store_true', help='for data_filtering_off mode')
     """ Model Architecture """
     parser.add_argument('--Transformation', type=str, required=True, help='Transformation stage. None|TPS')
-    parser.add_argument('--FeatureExtraction', type=str, required=True, help='FeatureExtraction stage. VGG|RCNN|ResNet')
+    parser.add_argument('--FeatureExtraction', type=str, required=True,
+                        help='FeatureExtraction stage. VGG|RCNN|ResNet')
     parser.add_argument('--SequenceModeling', type=str, required=True, help='SequenceModeling stage. None|BiLSTM')
     parser.add_argument('--Prediction', type=str, required=True, help='Prediction stage. CTC|Attn')
     parser.add_argument('--num_fiducial', type=int, default=20, help='number of fiducial points of TPS-STN')
-    parser.add_argument('--input_channel', type=int, default=1, help='the number of input channel of Feature extractor')
+    parser.add_argument('--input_channel', type=int, default=1,
+                        help='the number of input channel of Feature extractor')
     parser.add_argument('--output_channel', type=int, default=512,
                         help='the number of output channel of Feature extractor')
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
@@ -300,7 +313,6 @@ if __name__ == '__main__':
     parser.add_argument('--load_level', type=int, default=4, help='up to 0. Transformation\n1: FeatureExtraction\n2: SequenceModeling\n3: Prediction')
     # parser.add_argument('--freeze_level', type=int, default=3, help='up to 1. Transformation\n2: FeatureExtraction\n3: SequenceModeling\n4: Prediction')
     parser.add_argument('--save_iter', type=int, default=50000, help='number of iterations to save')
-    parser.add_argument('--select_val_data', type=str, default='', help='select validation data (default is --select-data)')
 
     opt = parser.parse_args()
 
@@ -313,17 +325,14 @@ if __name__ == '__main__':
     # Writer will output to ./runs/ directory by default
     writer = SummaryWriter(log_dir=f'./saved_models/{opt.experiment_name}')
 
-    if opt.select_val_data == '':
-        opt.select_val_data = opt.select_data
-
     # load custom character list
-    f=open("char_list.txt", "r")
-    opt.character = f.read()
+    # f=open(opt.char_set, "r")
+    # opt.character = f.read()
 
     """ vocab / character number configuration """
-    if opt.sensitive:
-        # opt.character += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-        opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
+    # if opt.sensitive:
+    #     # opt.character += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    #     opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
 
     """ Seed and GPU setting """
     # print("Random Seed: ", opt.manualSeed)
