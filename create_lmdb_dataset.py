@@ -86,8 +86,10 @@ def createDataset(inputPath, gtFile, outputPath, checkValid=True):
 
         imageKey = 'image-%09d'.encode() % cnt
         labelKey = 'label-%09d'.encode() % cnt
+        imagePathKey = 'image_path-%09d'.encode() % cnt
         cache[imageKey] = imageBin
         cache[labelKey] = label.encode()
+        cache[imagePathKey] = imagePath.encode()
 
         if cnt % 1000 == 0:
             writeCache(env, cache)

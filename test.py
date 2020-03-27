@@ -12,7 +12,7 @@ import numpy as np
 from nltk.metrics.distance import edit_distance
 
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
-from dataset import hierarchical_dataset, AlignCollate
+from dataset import hierarchical_dataset, AlignCollate, save_wrong_prediction
 from model import Model
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -83,8 +83,9 @@ def validation(model, criterion, evaluation_loader, converter, opt):
     length_of_data = 0
     infer_time = 0
     valid_loss_avg = Averager()
+    wrong_pred_list = []
 
-    for i, (image_tensors, labels) in enumerate(evaluation_loader):
+    for i, (image_tensors, labels, image_paths) in enumerate(evaluation_loader):
         batch_size = image_tensors.size(0)
         length_of_data = length_of_data + batch_size
         image = image_tensors.to(device)
@@ -129,7 +130,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
         preds_prob = F.softmax(preds, dim=2)
         preds_max_prob, _ = preds_prob.max(dim=2)
         confidence_score_list = []
-        for gt, pred, pred_max_prob in zip(labels, preds_str, preds_max_prob):
+        for gt, pred, pred_max_prob, image_path in zip(labels, preds_str, preds_max_prob, image_paths):
             # pred = pred.replace('.', '').replace(' ', '')
             if 'Attn' in opt.Prediction:
                 gt = gt[:gt.find('[s]')]
@@ -148,6 +149,8 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 
             if pred == gt:
                 n_correct += 1
+            else:
+                wrong_pred_list.append((image_path, pred, gt))
 
             '''
             (old version) ICDAR2017 DOST Normalized Edit Distance https://rrc.cvc.uab.es/?ch=7&com=tasks
@@ -177,7 +180,7 @@ def validation(model, criterion, evaluation_loader, converter, opt):
     accuracy = n_correct / float(length_of_data) * 100
     norm_ED = norm_ED / float(length_of_data)  # ICDAR2019 Normalized Edit Distance
 
-    return valid_loss_avg.val(), accuracy, norm_ED, preds_str, confidence_score_list, labels, infer_time, length_of_data
+    return valid_loss_avg.val(), accuracy, norm_ED, preds_str, confidence_score_list, labels, infer_time, length_of_data, wrong_pred_list
 
 
 def test(opt):
@@ -198,8 +201,17 @@ def test(opt):
 
     # load model
     print('loading pretrained model from %s' % opt.saved_model)
-    model.load_state_dict(torch.load(opt.saved_model, map_location=device))
-    opt.experiment_name = '_'.join(opt.saved_model.split('/')[1:])
+    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth', 'best_valid_loss.pth', 'TPS-ResNet-BiLSTM-CTC.pth']
+
+    if any(model_name in opt.saved_model for model_name in best_model_names):
+        model.load_state_dict(torch.load(opt.saved_model, map_location=device))
+    else:
+        checkpoint = torch.load(opt.saved_model, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        
+    # opt.experiment_name = '_'.join(opt.saved_model.split('/')[1:])
+    opt.experiment_name = opt.saved_model.split('/')[-2]
+    print('opt.experiment_name: ', opt.experiment_name)
     # print(model)
 
     """ keep evaluation model and result logs """
@@ -226,11 +238,13 @@ def test(opt):
                 shuffle=False,
                 num_workers=int(opt.workers),
                 collate_fn=AlignCollate_evaluation, pin_memory=True)
-            _, accuracy_by_best_model, _, _, _, _, _, _ = validation(
+            val_loss_by_best_model, accuracy_by_best_model, norm_ed_by_best_model, _, _, _, _, _, wrong_pred_list  = validation(
                 model, criterion, evaluation_loader, converter, opt)
+            # save wrong prediction in validation dataset to a folder
+            save_wrong_prediction(wrong_pred_list, folder_to_save=opt.experiment_name)
             log.write(eval_data_log)
-            print(f'{accuracy_by_best_model:0.3f}')
-            log.write(f'{accuracy_by_best_model:0.3f}\n')
+            print(f'{"Accuracy":10s}: {accuracy_by_best_model:0.3f}, {"Norm_ED":10s}: {norm_ed_by_best_model:0.2f}, {"Val loss":10s}: {val_loss_by_best_model:0.5f}')
+            log.write(f'{"Accuracy":10s}: {accuracy_by_best_model:0.3f}, {"Norm_ED":10s}: {norm_ed_by_best_model:0.2f}, {"Val loss":10s}: {val_loss_by_best_model:0.5f}\n')
             log.close()
 
 
@@ -263,13 +277,13 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
 
-    # load custom character list
-    f=open("char_list.txt", "r")
-    opt.character = f.read()
+    # # load custom character list
+    # f=open("char_list.txt", "r")
+    # opt.character = f.read()
 
-    """ vocab / character number configuration """
-    if opt.sensitive:
-        opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
+    # """ vocab / character number configuration """
+    # if opt.sensitive:
+    #     opt.character = string.printable[:-6]  # same with ASTER setting (use 94 char).
 
     cudnn.benchmark = True
     cudnn.deterministic = True

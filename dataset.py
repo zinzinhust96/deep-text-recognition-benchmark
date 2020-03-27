@@ -14,7 +14,7 @@ from torch._utils import _accumulate
 import torchvision.transforms as transforms
 import time
 from torchvision.utils import save_image as torch_save_image
-from utils import crop_image_with_pad
+from utils import crop_image_with_pad, save_prediction_results_with_gt
 
 
 class Batch_Balanced_Dataset(object):
@@ -88,12 +88,12 @@ class Batch_Balanced_Dataset(object):
 
         for i, data_loader_iter in enumerate(self.dataloader_iter_list):
             try:
-                image, text = data_loader_iter.next()
+                image, text, _ = data_loader_iter.next()
                 balanced_batch_images.append(image)
                 balanced_batch_texts += text
             except StopIteration:
                 self.dataloader_iter_list[i] = iter(self.data_loader_list[i])
-                image, text = self.dataloader_iter_list[i].next()
+                image, text, _ = self.dataloader_iter_list[i].next()
                 balanced_batch_images.append(image)
                 balanced_batch_texts += text
             except ValueError:
@@ -204,6 +204,10 @@ class LmdbDataset(Dataset):
         with self.env.begin(write=False) as txn:
             label_key = 'label-%09d'.encode() % index
             label = txn.get(label_key).decode('utf-8')
+            image_path_key = 'image_path-%09d'.encode() % index
+            image_path = txn.get(image_path_key)
+            if image_path:
+                image_path = image_path.decode('utf-8')
             img_key = 'image-%09d'.encode() % index
             imgbuf = txn.get(img_key)
 
@@ -236,7 +240,7 @@ class LmdbDataset(Dataset):
             out_of_char = f'[^{self.opt.character}]'
             label = re.sub(out_of_char, '', label)
 
-        return (img, label)
+        return (img, label, image_path)
 
 
 class RawDataset(Dataset):
@@ -345,7 +349,7 @@ class AlignCollate(object):
 
     def __call__(self, batch):
         batch = filter(lambda x: x is not None, batch)
-        images, labels = zip(*batch)
+        images, labels, image_paths = zip(*batch)
 
         if self.keep_ratio_with_pad:  # same concept with 'Rosetta' paper
             resized_max_w = self.imgW
@@ -379,7 +383,7 @@ class AlignCollate(object):
             image_tensors = [transform(image) for image in images]
             image_tensors = torch.cat([t.unsqueeze(0) for t in image_tensors], 0)
 
-        return image_tensors, labels
+        return image_tensors, labels, image_paths
 
 class CollateFn(object):
 
@@ -393,7 +397,6 @@ class CollateFn(object):
         ratio_list = np.array([image.size[0] / float(image.size[1]) for image in images])
         mean_ratio = np.mean(ratio_list)
         transform = ResizeNormalize((np.clip(int(self.imgH * mean_ratio), 40, None), self.imgH))
-        # #TODO: save padded image to inspect
         # for index, image in enumerate(images):
         #     save_pil_image(image, labels[index], transform, 'tps_test')
         # transform = ResizeNormalizeByHeight(height=32)
@@ -424,3 +427,10 @@ def tensor2im(image_tensor, imtype=np.uint8):
 def save_image(image_numpy, image_path):
     image_pil = Image.fromarray(image_numpy)
     image_pil.save(image_path)
+
+def save_wrong_prediction(wrong_pred_list, folder_to_save):
+    for index,wrong_pred in enumerate(wrong_pred_list):
+        (image_path, pred, gt) = wrong_pred
+        pil_image = Image.open(image_path).convert('RGB')
+        save_prediction_results_with_gt(pil_image, pred, gt, folder_to_save, saved_img_name = image_path.split('/')[-1])
+        # print(type(image_tensor), pred, gt)

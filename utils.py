@@ -1,5 +1,9 @@
 import torch
 from random import randint
+import uuid
+import os
+from PIL import Image, ImageOps, ImageDraw, ImageFont
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -129,3 +133,38 @@ def crop_image_with_pad(img, min_pad=5, max_pad=10):
     area = (max_pad - left_pad, max_pad - top_pad, w - (max_pad - right_pad), h - (max_pad - bottom_pad))
     cropped_img = img.crop(area)
     return cropped_img
+
+def save_prediction_result(img, img_path, pred, opt):
+    # add bottom border to image
+    img = ImageOps.expand(img, border=(0, 0, 0, 60))
+
+    fontpath = "./fonts/AndikaNewBasic-R.ttf"
+    font = ImageFont.truetype(fontpath, 40)
+    draw = ImageDraw.Draw(img)
+    # draw.text((x, y),"Sample Text",(r,g,b))
+    draw.text((0, img.size[1] - 60), f'{pred}', font = font, fill = (255,255,255))
+
+    #Save image
+    img.save(os.path.join(opt.save_results, img_path.split('/')[-1]))
+
+def save_prediction_results_with_gt(img, pred, gt, folder_to_save, saved_img_name):
+    # add bottom border to image
+    img = ImageOps.expand(img, border=(0, 0, 0, 60))
+
+    fontpath = "./fonts/AndikaNewBasic-R.ttf"
+    font = ImageFont.truetype(fontpath, 20)
+    draw = ImageDraw.Draw(img)
+    # draw.text((x, y),"Sample Text",(r,g,b))
+    draw.text((0, img.size[1] - 30), f'{pred}', font = font, fill = (255,0,0))
+    draw.text((0, img.size[1] - 60), f'{gt}', font = font, fill = (0,255,0))
+
+    save_path = os.path.join('result', folder_to_save, 'result')
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    img.save(os.path.join(save_path, '{}.jpg'.format(saved_img_name)))
+
+if __name__ == '__main__':
+    ctc = AttnLabelConverter('0123456789abcdefghijklmnopqrstuvwxyz')
+    t, l = ctc.encode(['miiinh'])
+    print(t, l)
+    print(ctc.decode(t, l))

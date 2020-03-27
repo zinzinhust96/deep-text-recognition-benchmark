@@ -5,39 +5,38 @@ import cv2
 import re
 import time
 import numpy as np
-from PIL import Image, ImageOps, ImageDraw, ImageFont
 
 import torch
 import torch.backends.cudnn as cudnn
 import torch.utils.data
 import torch.nn.functional as F
 
-from utils import CTCLabelConverter, AttnLabelConverter
+from utils import CTCLabelConverter, AttnLabelConverter, save_prediction_result
 from dataset import RawDataset, AlignCollate, CollateFn
 from model import Model
 from date_extractor.extractor import extract_dmy_from_text
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-def save_results(img_name, pred, confidence_score):
+def save_results(img_name, pred, confidence_score, opt):
     # Read image from path
     img = Image.open(img_name)
 
     # add top border to image
-    img = ImageOps.expand(img, border=(0, 0, 0, 40))
+    img = ImageOps.expand(img, border=(0, 0, 0, 60))
 
     fontpath = "./fonts/AndikaNewBasic-R.ttf"
-    font = ImageFont.truetype(fontpath, 24)
+    font = ImageFont.truetype(fontpath, 20)
     draw = ImageDraw.Draw(img)
     # draw.text((x, y),"Sample Text",(r,g,b))
-    draw.text((0, img.size[1] - 40), f'{pred} - {confidence_score:0.4f}', font = font, fill = (255,255,255))
+    draw.text((0, img.size[1] - 60), f'{pred}\n{confidence_score:0.4f}', font = font, fill = (255,255,255))
 
     #Save image
     testset_name, each_name = img_name.split('/')[-2:]
-    save_path = 'test_results/' + testset_name + '/'
+    save_path = opt.save_results
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    img.save(save_path + each_name + ".png")
+    img.save(os.path.join(save_path, each_name))
 
 
 def demo(opt):
@@ -123,7 +122,7 @@ def demo(opt):
                 log.write(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
 
                 # write results image
-                save_results(img_name, pred, confidence_score)
+                save_prediction_result(img_name, pred, confidence_score, opt)
 
     log.close()
 
@@ -133,6 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
     parser.add_argument('--batch_size', type=int, default=192, help='input batch size')
     parser.add_argument('--saved_model', required=True, help="path to saved_model to evaluation")
+    parser.add_argument('--save_results', required=True, help="path to saved results")
     """ Data processing """
     parser.add_argument('--batch_max_length', type=int, default=25, help='maximum-label-length')
     parser.add_argument('--imgH', type=int, default=32, help='the height of the input image')

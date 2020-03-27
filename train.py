@@ -32,7 +32,7 @@ def train(opt):
 
     log = open(f'./saved_models/{opt.experiment_name}/log_dataset.txt', 'a')
     AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
-    valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt, select_data=opt.select_data)
+    valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt, select_data=[opt.select_val_data])
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,
         shuffle=True,  # 'True' to check training progress with validation function.
@@ -78,8 +78,8 @@ def train(opt):
     model_state_dict = model.state_dict()
     pretrained_model_names = ['best_norm_ED', 'best_accuracy', 'best_valid_loss', 'pretrained', 'TPS-ResNet-BiLSTM-CTC']
     if opt.saved_model != '':
-        print('loading pretrained model from {}'.format(opt.saved_model))
-        if any(name in opt.saved_model for name in pretrained_model_names):
+        print('loading pretrained model from {}, model name: {}'.format(opt.saved_model, opt.saved_model.split('/')[-1]))
+        if any(name in opt.saved_model.split('/')[-1] for name in pretrained_model_names):
             pretrained_dict = torch.load(opt.saved_model)
         else:
             checkpoint = torch.load(opt.saved_model)
@@ -202,7 +202,7 @@ def train(opt):
             with open(f'./saved_models/{opt.experiment_name}/log_train.txt', 'a') as log:
                 model.eval()
                 with torch.no_grad():
-                    valid_loss, current_accuracy, current_norm_ED, preds, confidence_score, labels, infer_time, length_of_data = validation(
+                    valid_loss, current_accuracy, current_norm_ED, preds, confidence_score, labels, infer_time, length_of_data, _ = validation(
                         model, criterion, valid_loader, converter, opt)
                 model.train()
 
@@ -271,7 +271,7 @@ if __name__ == '__main__':
     parser.add_argument('--manualSeed', type=int, default=1111, help='for random seed setting')
     parser.add_argument('--workers', type=int, help='number of data loading workers', default=4)
     parser.add_argument('--batch_size', type=int, default=192, help='input batch size')
-    parser.add_argument('--num_iter', type=int, default=300000, help='number of iterations to train for')
+    parser.add_argument('--num_iter', type=int, default=1000000, help='number of iterations to train for')
     parser.add_argument('--valInterval', type=int, default=2000, help='Interval between each validation')
     parser.add_argument('--saved_model', default='', help="path to model to continue training")
     parser.add_argument('--FT', action='store_true', help='whether to do fine-tuning')
@@ -284,6 +284,8 @@ if __name__ == '__main__':
     """ Data processing """
     parser.add_argument('--select_data', type=str, default='MJ-ST',
                         help='select training data (default is MJ-ST, which means MJ and ST used as training data)')
+    parser.add_argument('--select_val_data', type=str, default='', help='select validation data (default is --select-data)')
+
     parser.add_argument('--batch_ratio', type=str, default='0.5-0.5',
                         help='assign ratio for each selected data in the batch')
     parser.add_argument('--total_data_usage_ratio', type=str, default='1.0',
@@ -324,6 +326,9 @@ if __name__ == '__main__':
     os.makedirs(f'./saved_models/{opt.experiment_name}', exist_ok=True)
     # Writer will output to ./runs/ directory by default
     writer = SummaryWriter(log_dir=f'./saved_models/{opt.experiment_name}')
+
+    if opt.select_val_data == '':
+        opt.select_val_data = opt.select_data
 
     # load custom character list
     # f=open(opt.char_set, "r")
