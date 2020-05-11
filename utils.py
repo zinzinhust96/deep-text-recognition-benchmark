@@ -147,16 +147,20 @@ def save_prediction_result(img, img_path, pred, opt):
     #Save image
     img.save(os.path.join(opt.save_results, img_path.split('/')[-1]))
 
-def save_prediction_results_with_gt(img, pred, gt, folder_to_save, saved_img_name):
+def save_prediction_results_with_gt(img, pred, gt, confidence_score, folder_to_save, saved_img_name):
     # add bottom border to image
-    img = ImageOps.expand(img, border=(0, 0, 0, 60))
+    img = ImageOps.expand(img, border=(0, 0, 0, 90))
 
     fontpath = "./fonts/AndikaNewBasic-R.ttf"
     font = ImageFont.truetype(fontpath, 20)
     draw = ImageDraw.Draw(img)
     # draw.text((x, y),"Sample Text",(r,g,b))
-    draw.text((0, img.size[1] - 30), f'{pred}', font = font, fill = (255,0,0))
-    draw.text((0, img.size[1] - 60), f'{gt}', font = font, fill = (0,255,0))
+    draw.text((0, img.size[1] - 30), f'{confidence_score}', font = font, fill = (255,255,255))
+    draw.text((0, img.size[1] - 60), f'{pred}', font = font, fill = (255,0,0))
+    draw.text((0, img.size[1] - 90), f'{gt}', font = font, fill = (0,255,0))
+
+    with open(os.path.join(os.path.join('result', folder_to_save, 'log_prediction.txt')), 'a') as fopen:
+        fopen.write('{}\t{}\t{}\n'.format(saved_img_name, gt, pred))
 
     save_path = os.path.join('result', folder_to_save, 'result')
     if not os.path.exists(save_path):

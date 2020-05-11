@@ -11,33 +11,12 @@ import torch.backends.cudnn as cudnn
 import torch.utils.data
 import torch.nn.functional as F
 
+from PIL import Image, ImageOps, ImageDraw, ImageFont
 from utils import CTCLabelConverter, AttnLabelConverter, save_prediction_result
 from dataset import RawDataset, AlignCollate, CollateFn
 from model import Model
 from date_extractor.extractor import extract_dmy_from_text
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-def save_results(img_name, pred, confidence_score, opt):
-    # Read image from path
-    img = Image.open(img_name)
-
-    # add top border to image
-    img = ImageOps.expand(img, border=(0, 0, 0, 60))
-
-    fontpath = "./fonts/AndikaNewBasic-R.ttf"
-    font = ImageFont.truetype(fontpath, 20)
-    draw = ImageDraw.Draw(img)
-    # draw.text((x, y),"Sample Text",(r,g,b))
-    draw.text((0, img.size[1] - 60), f'{pred}\n{confidence_score:0.4f}', font = font, fill = (255,255,255))
-
-    #Save image
-    testset_name, each_name = img_name.split('/')[-2:]
-    save_path = opt.save_results
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    img.save(os.path.join(save_path, each_name))
-
 
 def demo(opt):
     """ model configuration """
@@ -57,7 +36,7 @@ def demo(opt):
 
     # load model
     print('loading pretrained model from %s' % opt.saved_model)
-    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth', 'best_valid_loss.pth', 'TPS-ResNet-BiLSTM-CTC.pth']
+    best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth', 'best_valid_loss.pth', 'TPS-ResNet-BiLSTM-CTC.pth', 'None-ResNet-None-CTC.pth']
 
     if any(model_name in opt.saved_model for model_name in best_model_names):
         model.load_state_dict(torch.load(opt.saved_model, map_location=device))
@@ -84,7 +63,7 @@ def demo(opt):
     print(f'{dashed_line}\n{head}\n{dashed_line}')
     log.write(f'{dashed_line}\n{head}\n{dashed_line}\n')
     with torch.no_grad():
-        for index, (image_tensors, image_path_list) in enumerate(demo_loader):
+        for index, (image_tensors, _, image_path_list) in enumerate(demo_loader):
             batch_size = image_tensors.size(0)
             image = image_tensors.to(device)
             # For max length prediction
@@ -109,7 +88,7 @@ def demo(opt):
 
             preds_prob = F.softmax(preds, dim=2)
             preds_max_prob, _ = preds_prob.max(dim=2)
-            for img_name, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
+            for img_path, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
                 if 'Attn' in opt.Prediction:
                     pred_EOS = pred.find('[s]')
                     pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
@@ -118,11 +97,11 @@ def demo(opt):
                 # calculate confidence score (= multiply of pred_max_prob)
                 confidence_score = pred_max_prob.cumprod(dim=0)[-1]
 
-                print(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}')
-                log.write(f'{img_name:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
+                print(f'{img_path:25s}\t{pred:25s}\t{confidence_score:0.4f}')
+                log.write(f'{img_path:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
 
                 # write results image
-                save_prediction_result(img_name, pred, confidence_score, opt)
+                save_prediction_result(Image.open(img_path), img_path, pred, opt)
 
     log.close()
 
@@ -153,6 +132,9 @@ if __name__ == '__main__':
     parser.add_argument('--hidden_size', type=int, default=256, help='the size of the LSTM hidden state')
 
     opt = parser.parse_args()
+
+    if not os.path.exists(opt.save_results):
+        os.makedirs(opt.save_results)
 
     # load custom character list
     # f=open("char_list.txt", "r")

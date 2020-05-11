@@ -253,10 +253,12 @@ def train(opt):
         # save model per 1e+5 iter.
         if (i + 1) % opt.save_iter == 0:
             print('saving iteration {}...'.format(i + 1))
-            torch.save({
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-            }, './saved_models/{}/iter_{}.pth'.format(opt.experiment_name,i+1))
+            # torch.save({
+            #     'model_state_dict': model.state_dict(),
+            #     'optimizer_state_dict': optimizer.state_dict(),
+            # }, './saved_models/{}/iter_{}.pth'.format(opt.experiment_name,i+1))
+            torch.save(
+                model.state_dict(), f'./saved_models/{opt.experiment_name}/iter_{i+1}.pth')
 
         if i == opt.num_iter:
             print('end the training')

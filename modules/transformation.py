@@ -34,10 +34,12 @@ class TPS_SpatialTransformerNetwork(nn.Module):
         # print('build_P_prime: ', build_P_prime.shape)
         build_P_prime_reshape = build_P_prime.reshape([build_P_prime.size(0), self.I_r_size[0], self.I_r_size[1], 2])
         
-        if torch.__version__ > "1.2.0":
-            batch_I_r = F.grid_sample(batch_I, build_P_prime_reshape, padding_mode='border', align_corners=True)
-        else:
-            batch_I_r = F.grid_sample(batch_I, build_P_prime_reshape, padding_mode='border')
+        # if torch.__version__ > "1.2.0":
+        #     batch_I_r = F.grid_sample(batch_I, build_P_prime_reshape, padding_mode='border', align_corners=True)
+        # else:
+        #     batch_I_r = F.grid_sample(batch_I, build_P_prime_reshape, padding_mode='border')
+
+        batch_I_r = F.grid_sample(batch_I, build_P_prime_reshape, padding_mode='border')
 
         return batch_I_r
 

@@ -66,7 +66,7 @@ class Batch_Balanced_Dataset(object):
 
             _data_loader = torch.utils.data.DataLoader(
                 _dataset, batch_size=_batch_size,
-                shuffle=False,
+                shuffle=True,
                 num_workers=int(opt.workers),
                 collate_fn=_AlignCollate, pin_memory=True)
             self.data_loader_list.append(_data_loader)
@@ -173,6 +173,9 @@ class LmdbDataset(Dataset):
                 use --sensitive and --data_filtering_off,
                 see https://github.com/clovaai/deep-text-recognition-benchmark/blob/dff844874dbe9e0ec8c5a52a7bd08c7f20afe704/test.py#L137-L144
                 """
+                # all_words = []
+                # existing = dict()
+
                 self.filtered_index_list = []
                 for index in range(self.nSamples):
                     index += 1  # lmdb starts with 1
@@ -188,9 +191,15 @@ class LmdbDataset(Dataset):
                     # You can add [UNK] token to `opt.character` in utils.py instead of this filtering.
                     out_of_char = f'[^{self.opt.character}]'
                     if re.search(out_of_char, label):
+                        # print('out of char: ', label, '\t', re.search(out_of_char, label).group())
+                        # if label not in existing:
+                        #     all_words.append(label)
+                        #     existing[label] = len(all_words)-1
                         continue
 
                     self.filtered_index_list.append(index)
+
+                # print('ALL OUT OF CHAR: ', all_words)
 
                 self.nSamples = len(self.filtered_index_list)
 
@@ -287,7 +296,7 @@ class RawDataset(Dataset):
         #     os.makedirs(save_path)
         # img.save("{}/{}".format(save_path, img_name))
 
-        return (img, self.image_path_list[index])
+        return (img, None, self.image_path_list[index])
 
 
 class ResizeNormalize(object):
@@ -430,7 +439,7 @@ def save_image(image_numpy, image_path):
 
 def save_wrong_prediction(wrong_pred_list, folder_to_save):
     for index,wrong_pred in enumerate(wrong_pred_list):
-        (image_path, pred, gt) = wrong_pred
+        (image_path, pred, gt, confidence_score) = wrong_pred
         pil_image = Image.open(image_path).convert('RGB')
-        save_prediction_results_with_gt(pil_image, pred, gt, folder_to_save, saved_img_name = image_path.split('/')[-1])
+        save_prediction_results_with_gt(pil_image, pred, gt, confidence_score, folder_to_save, saved_img_name = image_path.split('/')[-1])
         # print(type(image_tensor), pred, gt)
