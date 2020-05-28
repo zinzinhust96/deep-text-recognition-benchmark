@@ -380,7 +380,7 @@ class AlignCollate(object):
                 # else:
                 resized_image = image.resize((resized_w, self.imgH), Image.BICUBIC) #ANTIALIAS
                 resized_images.append(transform(resized_image))
-                # resized_image.save('./image_test/%d_test.jpg' % w)
+                # resized_image.save('./input_test/%d_test.jpg' % w)
             
             # for index, image in enumerate(resized_images):
             #     save_tensor_image(image, labels[index], 'input_test/after_transform')

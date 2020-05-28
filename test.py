@@ -14,6 +14,7 @@ from nltk.metrics.distance import edit_distance
 from utils import CTCLabelConverter, AttnLabelConverter, Averager
 from dataset import hierarchical_dataset, AlignCollate, save_wrong_prediction
 from model import Model
+from tqdm import tqdm
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
@@ -83,9 +84,9 @@ def validation(model, criterion, evaluation_loader, converter, opt):
     length_of_data = 0
     infer_time = 0
     valid_loss_avg = Averager()
-    wrong_pred_list = []
 
-    for i, (image_tensors, labels, image_paths) in enumerate(evaluation_loader):
+    for i, (image_tensors, labels, image_paths) in enumerate(tqdm(evaluation_loader)):
+        wrong_pred_list = []
         batch_size = image_tensors.size(0)
         length_of_data = length_of_data + batch_size
         image = image_tensors.to(device)
@@ -175,8 +176,11 @@ def validation(model, criterion, evaluation_loader, converter, opt):
             confidence_score_list.append(confidence_score)
             
             # print(pred, gt, pred==gt, confidence_score)
-            if pred != gt:
+            if pred != gt or (pred == gt and confidence_score < 0.9):
                 wrong_pred_list.append((image_path, pred, gt, confidence_score))
+
+        # save wrong prediction in validation dataset to a folder
+        # save_wrong_prediction(wrong_pred_list, folder_to_save=opt.experiment_name)
 
     accuracy = n_correct / float(length_of_data) * 100
     norm_ED = norm_ED / float(length_of_data)  # ICDAR2019 Normalized Edit Distance
@@ -204,11 +208,11 @@ def test(opt):
     print('loading pretrained model from %s' % opt.saved_model)
     best_model_names = ['best_norm_ED.pth', 'best_accuracy.pth', 'best_valid_loss.pth', 'TPS-ResNet-BiLSTM-CTC.pth']
 
-    if any(model_name in opt.saved_model for model_name in best_model_names):
-        model.load_state_dict(torch.load(opt.saved_model, map_location=device))
-    else:
-        checkpoint = torch.load(opt.saved_model, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
+    # if any(model_name in opt.saved_model for model_name in best_model_names):
+    model.load_state_dict(torch.load(opt.saved_model, map_location=device))
+    # else:
+    #     checkpoint = torch.load(opt.saved_model, map_location=device)
+    #     model.load_state_dict(checkpoint['model_state_dict'])
         
     # opt.experiment_name = '_'.join(opt.saved_model.split('/')[1:])
     opt.experiment_name = opt.saved_model.split('/')[-2]
@@ -241,8 +245,6 @@ def test(opt):
                 collate_fn=AlignCollate_evaluation, pin_memory=True)
             val_loss_by_best_model, accuracy_by_best_model, norm_ed_by_best_model, _, _, _, _, _, wrong_pred_list  = validation(
                 model, criterion, evaluation_loader, converter, opt)
-            # save wrong prediction in validation dataset to a folder
-            save_wrong_prediction(wrong_pred_list, folder_to_save=opt.experiment_name)
             log.write(eval_data_log)
             print(f'{"Accuracy":10s}: {accuracy_by_best_model:0.3f}, {"Norm_ED":10s}: {norm_ed_by_best_model:0.2f}, {"Val loss":10s}: {val_loss_by_best_model:0.5f}')
             log.write(f'{"Accuracy":10s}: {accuracy_by_best_model:0.3f}, {"Norm_ED":10s}: {norm_ed_by_best_model:0.2f}, {"Val loss":10s}: {val_loss_by_best_model:0.5f}\n')

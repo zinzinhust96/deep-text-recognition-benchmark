@@ -54,6 +54,39 @@ class CTCLabelConverter(object):
             index += l
         return texts
 
+    def decode_with_threshold(self, text_index, length, preds_max_prob):
+        """ convert text-index into text-label. """
+        texts = []
+        texts_score = []
+        raws = []
+        index = 0
+        for i, l in enumerate(length):
+            t = text_index[index:index + l]
+            preds_max_prob_each = preds_max_prob[i]
+
+            # log raw tokens into an array
+            raw_list = []
+            for i in range(l):
+                raw_list.append(self.character[t[i]])
+
+            # remove detected token with low confident score
+            # CONFIDENT_THRESHOLD = 0.90
+            # t = [c for i, c in enumerate(t) if preds_max_prob_each[i] > CONFIDENT_THRESHOLD or self.character[c] == '[blank]']
+
+            char_list = []
+            score_list = []
+            for i in range(len(t)):
+                if t[i] != 0 and (not (i > 0 and t[i - 1] == t[i])):  # removing repeated characters and blank.
+                    char_list.append(self.character[t[i]])
+                    score_list.append(preds_max_prob_each[i])
+            text = ''.join(char_list)
+
+            texts.append(text)
+            texts_score.append(score_list)
+            raws.append(raw_list)
+            index += l
+        return texts, texts_score, raws
+
 
 class AttnLabelConverter(object):
     """ Convert between text-label and text-index """
@@ -136,36 +169,51 @@ def crop_image_with_pad(img, min_pad=5, max_pad=10):
 
 def save_prediction_result(img, img_path, pred, opt):
     # add bottom border to image
-    img = ImageOps.expand(img, border=(0, 0, 0, 60))
-
-    fontpath = "./fonts/AndikaNewBasic-R.ttf"
-    font = ImageFont.truetype(fontpath, 40)
-    draw = ImageDraw.Draw(img)
-    # draw.text((x, y),"Sample Text",(r,g,b))
-    draw.text((0, img.size[1] - 60), f'{pred}', font = font, fill = (255,255,255))
-
-    #Save image
-    img.save(os.path.join(opt.save_results, img_path.split('/')[-1]))
-
-def save_prediction_results_with_gt(img, pred, gt, confidence_score, folder_to_save, saved_img_name):
-    # add bottom border to image
-    img = ImageOps.expand(img, border=(0, 0, 0, 90))
+    img = ImageOps.expand(img, border=(0, 0, 0, 30))
 
     fontpath = "./fonts/AndikaNewBasic-R.ttf"
     font = ImageFont.truetype(fontpath, 20)
     draw = ImageDraw.Draw(img)
     # draw.text((x, y),"Sample Text",(r,g,b))
-    draw.text((0, img.size[1] - 30), f'{confidence_score}', font = font, fill = (255,255,255))
-    draw.text((0, img.size[1] - 60), f'{pred}', font = font, fill = (255,0,0))
-    draw.text((0, img.size[1] - 90), f'{gt}', font = font, fill = (0,255,0))
+    draw.text((0, img.size[1] - 30), f'{pred}', font = font, fill = (255,0,0))
 
-    with open(os.path.join(os.path.join('result', folder_to_save, 'log_prediction.txt')), 'a') as fopen:
-        fopen.write('{}\t{}\t{}\n'.format(saved_img_name, gt, pred))
+    #Save image
+    img.save(os.path.join(opt.save_results, img_path.split('/')[-1]))
 
-    save_path = os.path.join('result', folder_to_save, 'result')
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
-    img.save(os.path.join(save_path, '{}.jpg'.format(saved_img_name)))
+def save_prediction_results_with_gt(img, pred, gt, confidence_score, folder_to_save, saved_img_name):
+    saved_img_name_no_png = saved_img_name.split('.')[0]
+    if pred != gt:
+        # add bottom border to image
+        img_visualized = ImageOps.expand(img, border=(0, 0, 0, 90))
+
+        fontpath = "./fonts/AndikaNewBasic-R.ttf"
+        font = ImageFont.truetype(fontpath, 20)
+        draw = ImageDraw.Draw(img_visualized)
+        # draw.text((x, y),"Sample Text",(r,g,b))
+        draw.text((0, img_visualized.size[1] - 30), f'{confidence_score}', font = font, fill = (255,255,255))
+        draw.text((0, img_visualized.size[1] - 60), f'{pred}', font = font, fill = (255,0,0))
+        draw.text((0, img_visualized.size[1] - 90), f'{gt}', font = font, fill = (0,255,0))
+
+        save_path = os.path.join('result', folder_to_save, 'result')
+
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+
+        with open(os.path.join(os.path.join('result', folder_to_save, 'log_prediction.txt')), 'a') as fopen:
+            fopen.write('{}\t{}\t{}\n'.format(saved_img_name, gt, pred))
+            
+        img_visualized.save(os.path.join(save_path, '{}.jpg'.format(saved_img_name_no_png)))
+
+    # save images for training
+    train_path = os.path.join('result', folder_to_save, 'wrong')
+    if not os.path.exists(train_path):
+        os.makedirs(train_path)
+    if not os.path.exists(os.path.join(train_path, 'img')):
+        os.makedirs(os.path.join(train_path, 'img'))
+    img.save(os.path.join(train_path, 'img', '{}.jpg'.format(saved_img_name_no_png)))
+    line_to_write = '{}/{}\t{}.jpg\n'.format('img', saved_img_name_no_png, gt)
+    with open(os.path.join(train_path, 'label.txt'), 'a') as fwrite:
+        fwrite.write(line_to_write)
 
 if __name__ == '__main__':
     ctc = AttnLabelConverter('0123456789abcdefghijklmnopqrstuvwxyz')

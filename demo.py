@@ -77,18 +77,27 @@ def demo(opt):
                 preds_size = torch.IntTensor([preds.size(1)] * batch_size)
                 _, preds_index = preds.max(2)
                 preds_index = preds_index.view(-1)
-                preds_str = converter.decode(preds_index.data, preds_size.data)
+                # preds_str = converter.decode(preds_index.data, preds_size.data)
 
             else:
                 preds = model(image, text_for_pred, is_train=False)
 
                 # select max probabilty (greedy decoding) then decode index to character
                 _, preds_index = preds.max(2)
-                preds_str = converter.decode(preds_index, length_for_pred)
+                # preds_str = converter.decode(preds_index, length_for_pred)
 
             preds_prob = F.softmax(preds, dim=2)
             preds_max_prob, _ = preds_prob.max(dim=2)
-            for img_path, pred, pred_max_prob in zip(image_path_list, preds_str, preds_max_prob):
+
+            # decode sequence of token
+            if 'CTC' in opt.Prediction:
+                preds_str, preds_score, raws_str = converter.decode_with_threshold(preds_index.data, preds_size.data, preds_max_prob)
+                # print('raws_str', np.array(raws_str).shape, raws_str)
+
+            else:
+                preds_str = converter.decode(preds_index, length_for_pred)
+
+            for img_path, pred, pred_score, raw_str, pred_max_prob in zip(image_path_list, preds_str, preds_score, raws_str, preds_max_prob):
                 if 'Attn' in opt.Prediction:
                     pred_EOS = pred.find('[s]')
                     pred = pred[:pred_EOS]  # prune after "end of sentence" token ([s])
@@ -99,6 +108,22 @@ def demo(opt):
 
                 print(f'{img_path:25s}\t{pred:25s}\t{confidence_score:0.4f}')
                 log.write(f'{img_path:25s}\t{pred:25s}\t{confidence_score:0.4f}\n')
+
+                '''
+                if len(raw_str) == len(pred_max_prob):
+                    print('===== confident score for each token =====')
+                    for token, score in zip(raw_str, pred_max_prob):
+                        print(token, '\t', score.item())
+                    print('\n')            
+                # '''
+
+                # '''
+                if len(pred) == len(pred_score):
+                    print('===== confident score for final set of token =====')
+                    for token, score in zip(pred, pred_score):
+                        print(token, '\t', score.item())
+                    print('\n')            
+                # '''
 
                 # write results image
                 save_prediction_result(Image.open(img_path), img_path, pred, opt)
@@ -133,8 +158,8 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
 
-    if not os.path.exists(opt.save_results):
-        os.makedirs(opt.save_results)
+    # if not os.path.exists(opt.save_results):
+    #     os.makedirs(opt.save_results)
 
     # load custom character list
     # f=open("char_list.txt", "r")

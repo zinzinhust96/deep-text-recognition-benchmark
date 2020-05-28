@@ -72,10 +72,11 @@ class Model(nn.Module):
     def forward(self, input, text, index=-1, is_train=True):
         """ Transformation stage """
         if not self.stages['Trans'] == "None":
+            # folder_name = self.opt.image_folder.split('/')[-1]
+            # save_tensor_image(input, label=str(index), folder_name=os.path.join('input_test', folder_name))
             input = self.Transformation(input)
             # if index > -1:
-            #     folder_name = self.opt.image_folder.split('/')[-1]
-            #     save_tensor_image(input, label=str(index), folder_name=os.path.join('input_test', folder_name))
+            #     save_tensor_image(input, label=str(index+1), folder_name=os.path.join('input_test', folder_name))
 
         """ Feature extraction stage """
         visual_feature = self.FeatureExtraction(input)
