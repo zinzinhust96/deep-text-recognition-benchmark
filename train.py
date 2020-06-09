@@ -30,7 +30,7 @@ def train(opt):
     opt.batch_ratio = opt.batch_ratio.split('-')
     train_dataset = Batch_Balanced_Dataset(opt)
 
-    log = open(f'./saved_models/{opt.experiment_name}/log_dataset.txt', 'a')
+    log = open(f'./saved_models/{opt.exp_name}/log_dataset.txt', 'a')
     AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
     valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt, select_data=[opt.select_val_data])
     valid_loader = torch.utils.data.DataLoader(
@@ -134,7 +134,7 @@ def train(opt):
 
     """ final options """
     # print(opt)
-    with open(f'./saved_models/{opt.experiment_name}/opt.txt', 'a') as opt_file:
+    with open(f'./saved_models/{opt.exp_name}/opt.txt', 'a') as opt_file:
         opt_log = '------------ Options -------------\n'
         args = vars(opt)
         for k, v in args.items():
@@ -157,7 +157,7 @@ def train(opt):
     best_accuracy = -1
     best_norm_ED = -1
     best_valid_loss = 1e+6
-    i = start_iter
+    iteration = start_iter
 
     while(True):
         # train part
@@ -167,21 +167,10 @@ def train(opt):
         batch_size = image.size(0)
 
         if 'CTC' in opt.Prediction:
-            preds = model(image, text).log_softmax(2)
+            preds = model(image, text)
             preds_size = torch.IntTensor([preds.size(1)] * batch_size)
-            preds = preds.permute(1, 0, 2)
-
-            # (ctc_a) For PyTorch 1.2.0 and 1.3.0. To avoid ctc_loss issue, disabled cudnn for the computation of the ctc_loss
-            # https://github.com/jpuigcerver/PyLaia/issues/16
-            torch.backends.cudnn.enabled = False
-            cost = criterion(preds, text.to(device), preds_size.to(device), length.to(device))
-            torch.backends.cudnn.enabled = True
-
-            # # (ctc_b) To reproduce our pretrained model / paper, use our previous code (below code) instead of (ctc_a).
-            # # With PyTorch 1.2.0, the below code occurs NAN, so you may use PyTorch 1.1.0.
-            # # Thus, the result of CTCLoss is different in PyTorch 1.1.0 and PyTorch 1.2.0.
-            # # See https://github.com/clovaai/deep-text-recognition-benchmark/issues/56#issuecomment-526490707
-            # cost = criterion(preds, text, preds_size, length)
+            preds = preds.log_softmax(2).permute(1, 0, 2)
+            cost = criterion(preds, text, preds_size, length)
 
         else:
             preds = model(image, text[:, :-1])  # align with Attention.forward
@@ -196,10 +185,10 @@ def train(opt):
         loss_avg.add(cost)
 
         # validation part
-        if i % opt.valInterval == 0:
+        if (iteration + 1) % opt.valInterval == 0 or iteration == 0: # To see training progress, we also conduct validation when 'iteration == 0' 
             elapsed_time = time.time() - start_time
             # for log
-            with open(f'./saved_models/{opt.experiment_name}/log_train.txt', 'a') as log:
+            with open(f'./saved_models/{opt.exp_name}/log_train.txt', 'a') as log:
                 model.eval()
                 with torch.no_grad():
                     valid_loss, current_accuracy, current_norm_ED, preds, confidence_score, labels, infer_time, length_of_data, _ = validation(
@@ -207,29 +196,29 @@ def train(opt):
                 model.train()
 
                 # training loss and validation loss
-                loss_log = f'[{i}/{opt.num_iter}] Train loss: {loss_avg.val():0.5f}, Valid loss: {valid_loss:0.5f}, Elapsed_time: {elapsed_time:0.5f}'
+                loss_log = f'[{iteration+1}/{opt.num_iter}] Train loss: {loss_avg.val():0.5f}, Valid loss: {valid_loss:0.5f}, Elapsed_time: {elapsed_time:0.5f}'
                 print(loss_log)
                 log.write(loss_log + '\n')
-                writer.add_scalar('Train loss', loss_avg.val(), i)
-                writer.add_scalar('Valid loss', valid_loss, i)
+                writer.add_scalar('Train loss', loss_avg.val(), iteration)
+                writer.add_scalar('Valid loss', valid_loss, iteration)
                 loss_avg.reset()
 
                 current_model_log = f'{"Current_accuracy":17s}: {current_accuracy:0.3f}, {"Current_norm_ED":17s}: {current_norm_ED:0.2f}, {"Current_val_loss":17s}: {valid_loss:0.5f}'
                 print(current_model_log)
                 log.write(current_model_log + '\n')
-                writer.add_scalar('Valid Accuracy', current_accuracy, i)
-                writer.add_scalar('Valid Norm_ED', current_norm_ED, i)
+                writer.add_scalar('Valid Accuracy', current_accuracy, iteration)
+                writer.add_scalar('Valid Norm_ED', current_norm_ED, iteration)
 
                 # keep best accuracy model (on valid dataset)
                 if current_accuracy > best_accuracy:
                     best_accuracy = current_accuracy
-                    torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_accuracy.pth')
+                    torch.save(model.state_dict(), f'./saved_models/{opt.exp_name}/best_accuracy.pth')
                 if current_norm_ED > best_norm_ED:
                     best_norm_ED = current_norm_ED
-                    torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_norm_ED.pth')
+                    torch.save(model.state_dict(), f'./saved_models/{opt.exp_name}/best_norm_ED.pth')
                 if valid_loss < best_valid_loss:
                     best_valid_loss = valid_loss
-                    torch.save(model.state_dict(), f'./saved_models/{opt.experiment_name}/best_valid_loss.pth')
+                    torch.save(model.state_dict(), f'./saved_models/{opt.exp_name}/best_valid_loss.pth')
                 best_model_log = f'{"Best_accuracy":17s}: {best_accuracy:0.3f}, {"Best_norm_ED":17s}: {best_norm_ED:0.2f}, , {"Best_val_loss":17s}: {best_valid_loss:0.5f}'
 
                 loss_model_log = f'{loss_log}\n{current_model_log}\n{best_model_log}'
@@ -251,23 +240,23 @@ def train(opt):
                 log.write(predicted_result_log + '\n')
 
         # save model per 1e+5 iter.
-        if (i + 1) % opt.save_iter == 0:
-            print('saving iteration {}...'.format(i + 1))
+        if (iteration + 1) % opt.save_iter == 0:
+            print('saving iteration {}...'.format(iteration + 1))
             # torch.save({
             #     'model_state_dict': model.state_dict(),
             #     'optimizer_state_dict': optimizer.state_dict(),
             # }, './saved_models/{}/iter_{}.pth'.format(opt.experiment_name,i+1))
             torch.save(
-                model.state_dict(), f'./saved_models/{opt.experiment_name}/iter_{i+1}.pth')
+                model.state_dict(), f'./saved_models/{opt.exp_name}/iter_{iteration+1}.pth')
 
-        if i == opt.num_iter:
+        if (iteration + 1) == opt.num_iter:
             print('end the training')
             sys.exit()
-        i += 1
+        iteration += 1
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--experiment_name', help='Where to store logs and models')
+    parser.add_argument('--exp_name', help='Where to store logs and models')
     parser.add_argument('--train_data', required=True, help='path to training dataset')
     parser.add_argument('--valid_data', required=True, help='path to validation dataset')
     parser.add_argument('--manualSeed', type=int, default=1111, help='for random seed setting')
@@ -320,12 +309,12 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
 
-    if not opt.experiment_name:
-        opt.experiment_name = f'{opt.Transformation}-{opt.FeatureExtraction}-{opt.SequenceModeling}-{opt.Prediction}'
-        opt.experiment_name += f'-Seed{opt.manualSeed}'
-        # print(opt.experiment_name)
+    if not opt.exp_name:
+        opt.exp_name = f'{opt.Transformation}-{opt.FeatureExtraction}-{opt.SequenceModeling}-{opt.Prediction}'
+        opt.exp_name += f'-Seed{opt.manualSeed}'
+        # print(opt.exp_name)
 
-    os.makedirs(f'./saved_models/{opt.experiment_name}', exist_ok=True)
+    os.makedirs(f'./saved_models/{opt.exp_name}', exist_ok=True)
     # Writer will output to ./runs/ directory by default
     writer = SummaryWriter(log_dir=f'./saved_models/{opt.experiment_name}')
 

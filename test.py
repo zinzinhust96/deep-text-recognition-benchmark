@@ -35,7 +35,7 @@ def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=Fa
     total_forward_time = 0
     total_evaluation_data_number = 0
     total_correct_number = 0
-    log = open(f'./result/{opt.experiment_name}/log_all_evaluation.txt', 'a')
+    log = open(f'./result/{opt.exp_name}/log_all_evaluation.txt', 'a')
     dashed_line = '-' * 80
     print(dashed_line)
     log.write(dashed_line + '\n')
@@ -108,9 +108,8 @@ def validation(model, criterion, evaluation_loader, converter, opt):
 
             # Select max probabilty (greedy decoding) then decode index to character
             _, preds_index = preds.max(2)
-            preds_index = preds_index.view(-1)
             preds_str = converter.decode(preds_index.data, preds_size.data)
-
+        
         else:
             preds = model(image, text_for_pred, is_train=False)
             forward_time = time.time() - start_time
@@ -214,14 +213,14 @@ def test(opt):
     #     checkpoint = torch.load(opt.saved_model, map_location=device)
     #     model.load_state_dict(checkpoint['model_state_dict'])
         
-    # opt.experiment_name = '_'.join(opt.saved_model.split('/')[1:])
-    opt.experiment_name = opt.saved_model.split('/')[-2]
-    print('opt.experiment_name: ', opt.experiment_name)
+    opt.exp_name = '_'.join(opt.saved_model.split('/')[1:])
+    # opt.exp_name = opt.saved_model.split('/')[-2]
+    print('opt.exp_name: ', opt.exp_name)
     # print(model)
 
     """ keep evaluation model and result logs """
-    os.makedirs(f'./result/{opt.experiment_name}', exist_ok=True)
-    os.system(f'cp {opt.saved_model} ./result/{opt.experiment_name}/')
+    os.makedirs(f'./result/{opt.exp_name}', exist_ok=True)
+    os.system(f'cp {opt.saved_model} ./result/{opt.exp_name}/')
 
     """ setup loss """
     if 'CTC' in opt.Prediction:
@@ -235,7 +234,7 @@ def test(opt):
         if opt.benchmark_all_eval:  # evaluation with 10 benchmark evaluation datasets
             benchmark_all_eval(model, criterion, converter, opt)
         else:
-            log = open(f'./result/{opt.experiment_name}/log_evaluation.txt', 'a')
+            log = open(f'./result/{opt.exp_name}/log_evaluation.txt', 'a')
             AlignCollate_evaluation = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
             eval_data, eval_data_log = hierarchical_dataset(root=opt.eval_data, opt=opt)
             evaluation_loader = torch.utils.data.DataLoader(
