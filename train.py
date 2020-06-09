@@ -31,7 +31,7 @@ def train(opt):
     train_dataset = Batch_Balanced_Dataset(opt)
 
     log = open(f'./saved_models/{opt.experiment_name}/log_dataset.txt', 'a')
-    AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+    AlignCollate_valid = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD, Transformation=opt.Transformation)
     valid_dataset, valid_dataset_log = hierarchical_dataset(root=opt.valid_data, opt=opt, select_data=[opt.select_val_data])
     valid_loader = torch.utils.data.DataLoader(
         valid_dataset, batch_size=opt.batch_size,

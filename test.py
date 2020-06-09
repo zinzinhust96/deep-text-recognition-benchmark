@@ -41,7 +41,7 @@ def benchmark_all_eval(model, criterion, converter, opt, calculate_infer_time=Fa
     log.write(dashed_line + '\n')
     for eval_data in eval_data_list:
         eval_data_path = os.path.join(opt.eval_data, eval_data)
-        AlignCollate_evaluation = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+        AlignCollate_evaluation = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD, Transformation=opt.Transformation)
         eval_data, eval_data_log = hierarchical_dataset(root=eval_data_path, opt=opt)
         evaluation_loader = torch.utils.data.DataLoader(
             eval_data, batch_size=evaluation_batch_size,
@@ -236,7 +236,7 @@ def test(opt):
             benchmark_all_eval(model, criterion, converter, opt)
         else:
             log = open(f'./result/{opt.experiment_name}/log_evaluation.txt', 'a')
-            AlignCollate_evaluation = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+            AlignCollate_evaluation = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD, Transformation=opt.Transformation)
             eval_data, eval_data_log = hierarchical_dataset(root=opt.eval_data, opt=opt)
             evaluation_loader = torch.utils.data.DataLoader(
                 eval_data, batch_size=opt.batch_size,

@@ -33,7 +33,7 @@ class Batch_Balanced_Dataset(object):
         log.write(f'dataset_root: {opt.train_data}\nopt.select_data: {opt.select_data}\nopt.batch_ratio: {opt.batch_ratio}\n')
         assert len(opt.select_data) == len(opt.batch_ratio)
 
-        _AlignCollate = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD)
+        _AlignCollate = AlignCollate(imgH=opt.imgH, imgW=opt.imgW, keep_ratio_with_pad=opt.PAD, Transformation=opt.Transformation)
         # _AlignCollate = CollateFn(imgH=32)
         self.data_loader_list = []
         self.dataloader_iter_list = []
@@ -342,19 +342,27 @@ class NormalizePAD(object):
         img.sub_(0.5).div_(0.5)
         c, h, w = img.size()
         Pad_img = torch.FloatTensor(*self.max_size).fill_(0)
-        Pad_img[:, :, :w] = img  # right pad
-        if self.max_size[2] != w:  # add border Pad
-            Pad_img[:, :, w:] = img[:, :, w - 1].unsqueeze(2).expand(c, h, self.max_size[2] - w)
+        if self.PAD_type == 'right':
+            Pad_img[:, :, :w] = img  # right pad
+            if self.max_size[2] != w:  # add border Pad
+                Pad_img[:, :, w:] = img[:, :, w - 1].unsqueeze(2).expand(c, h, self.max_size[2] - w)
+        elif self.PAD_type == 'left_right':
+            place_start = int((self.max_size[2] - w) / 2)
+            Pad_img[:, :, place_start:place_start+w] = img  # place image in center
+            if self.max_size[2] != w:
+                Pad_img[:, :, :place_start] = img[:, :, w - 1].unsqueeze(2).expand(c, h, place_start)
+                Pad_img[:, :, place_start+w:] = img[:, :, w - 1].unsqueeze(2).expand(c, h, self.max_size[2] - place_start - w)
 
         return Pad_img
 
 
 class AlignCollate(object):
 
-    def __init__(self, imgH=32, imgW=100, keep_ratio_with_pad=False):
+    def __init__(self, imgH=32, imgW=100, keep_ratio_with_pad=False, Transformation="TPS"):
         self.imgH = imgH
         self.imgW = imgW
         self.keep_ratio_with_pad = keep_ratio_with_pad
+        self.Transformation = Transformation
 
     def __call__(self, batch):
         batch = filter(lambda x: x is not None, batch)
@@ -363,7 +371,9 @@ class AlignCollate(object):
         if self.keep_ratio_with_pad:  # same concept with 'Rosetta' paper
             resized_max_w = self.imgW
             input_channel = 3 if images[0].mode == 'RGB' else 1
-            transform = NormalizePAD((input_channel, self.imgH, resized_max_w))
+            PAD_type = 'right' if self.Transformation == 'TPS' else 'left_right'
+            print('>>>>> [PADDING] PAD TYPE: ', PAD_type)
+            transform = NormalizePAD((input_channel, self.imgH, resized_max_w), PAD_type=PAD_type)
 
             resized_images = []
             for ieee, image in enumerate(images):
